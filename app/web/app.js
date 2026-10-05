@@ -8,6 +8,10 @@
   const $ = s => document.querySelector(s);
   const raiz = document.documentElement;
 
+  // Escapa texto que viene de los datos antes de meterlo en HTML (evita XSS).
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
   const recuerda = {
     lee(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     guarda(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* da igual */ } },
@@ -312,7 +316,7 @@
       b.style.setProperty("--c", color(p));
       b.setAttribute("aria-pressed", String(on));
       b.title = on ? "Quitar del gráfico y de las métricas" : "Volver a incluirlo";
-      b.innerHTML = `<i></i>${p.corto || p.nombre}<span class="im">${G.fmtEurCorto(valorDe(p))}</span>`;
+      b.innerHTML = `<i></i>${esc(p.corto || p.nombre)}<span class="im">${G.fmtEurCorto(valorDe(p))}</span>`;
       b.onclick = () => {
         if (on) { if (visibles().length <= 1) return; estado.ocultos.add(p.id); }
         else estado.ocultos.delete(p.id);
@@ -473,7 +477,7 @@
       const plTarjeta = plusvaliaDe(p);
       const rent = plTarjeta ? plTarjeta.pct : null;
       b.innerHTML = `<span class="barra"></span>
-        <div class="nm"><i></i>${p.corto || p.nombre}</div>
+        <div class="nm"><i></i>${esc(p.corto || p.nombre)}</div>
         <div class="vl">${G.fmtEur(valorDe(p))}</div>
         <div class="pi"><span>${oculto ? "fuera del gráfico" : G.fmtPct(p.peso, 1) + " del total"}</span>
           <span class="${rent == null ? "" : rent >= 0 ? "pos" : "neg"}">${rent == null ? "—" : G.fmtPctSigno(rent, 1)}</span></div>
@@ -498,7 +502,7 @@
       onClick: d => { if (d.id) { estado.fondo = d.id; irA("fondos"); } }
     });
     $("#leyendaDist").innerHTML = datos.map(d =>
-      `<tr><td><i style="background:${d.color}"></i>${d.nombre}</td>
+      `<tr><td><i style="background:${d.color}"></i>${esc(d.nombre)}</td>
        <td>${G.fmtEur(d.valor)}</td><td>${G.fmtPct(d.valor / total, 1)}</td></tr>`).join("");
   }
 
@@ -585,7 +589,7 @@
       `<thead><tr>${cols.map(c => `<th class="orden" data-c="${c[0]}">${c[1]}${o.col === c[0] ? (o.desc ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead>
        <tbody>${f.map(r => `<tr>
         <td>${G.fmtFecha(r.fecha)}</td>
-        <td><i class="pt" style="background:${r.color}"></i>${r.producto}</td>
+        <td><i class="pt" style="background:${r.color}"></i>${esc(r.producto)}</td>
         <td>${G.fmtEur(r.importe)}</td>
         <td>${r.valor != null ? G.fmtEur(r.valor) : "—"}</td>
         <td class="${r.pl >= 0 ? "pos" : "neg"}">${r.pl != null ? G.fmtEurSigno(r.pl) : "—"}</td>
@@ -693,7 +697,7 @@
        <tbody>${filas.map(({ p, d }) => {
         const var_ = d.fin - d.inicio;
         return `<tr>
-          <td><i class="pt" style="background:${color(p)}"></i>${p.corto || p.nombre}</td>
+          <td><i class="pt" style="background:${color(p)}"></i>${esc(p.corto || p.nombre)}</td>
           <td>${G.fmtEur(d.inicio)}</td>
           <td>${d.aportado ? G.fmtEur(d.aportado) : "—"}</td>
           <td class="${d.mercado >= 0 ? "pos" : "neg"}">${G.fmtEurSigno(d.mercado)}</td>
@@ -734,7 +738,7 @@
       const b = document.createElement("button");
       b.style.setProperty("--c", color(x));
       b.setAttribute("aria-pressed", String(x.id === estado.fondo));
-      b.innerHTML = `<i></i>${x.corto || x.nombre}`;
+      b.innerHTML = `<i></i>${esc(x.corto || x.nombre)}`;
       b.onclick = () => { estado.fondo = x.id; pintaFondos(); };
       $("#selFondo").appendChild(b);
     });
@@ -770,13 +774,13 @@
 
     sec.innerHTML = `
       <header>
-        <h2><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${color(p)};margin-right:9px"></span>${p.nombre}</h2>
+        <h2><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${color(p)};margin-right:9px"></span>${esc(p.nombre)}</h2>
         <div class="sep"></div>
         ${hayVL ? '<div class="segm" id="segSerie"></div>' : ""}
       </header>
-      ${p.papel ? `<div class="papel">${p.papel}</div>` : ""}
-      ${p.indiceDetalle ? `<p style="color:var(--tinta2);font-size:13.5px;margin:0 0 16px">${p.indiceDetalle}</p>` : ""}
-      <div class="ficha">${campos.map(c => `<div><dt>${c[0]}</dt><dd>${c[1]}</dd></div>`).join("")}</div>
+      ${p.papel ? `<div class="papel">${esc(p.papel)}</div>` : ""}
+      ${p.indiceDetalle ? `<p style="color:var(--tinta2);font-size:13.5px;margin:0 0 16px">${esc(p.indiceDetalle)}</p>` : ""}
+      <div class="ficha">${campos.map(c => `<div><dt>${c[0]}</dt><dd>${esc(c[1])}</dd></div>`).join("")}</div>
       <div id="ventanas"></div>
       ${pocos ? '<p class="subt" style="margin:0 0 12px">Solo hay un valor anotado, así que aún no hay curva. Anota más en «Mis datos → Saldos y valores».</p>' : ""}
       <div class="envGraf" id="grafFondo"></div>
@@ -808,7 +812,7 @@
         .map(k => `<div class="ventana"><div class="e">${et[k]}</div>
           <div class="v ${p.ventanas[k] >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(p.ventanas[k], 1)}</div></div>`).join("");
       if (celdas) {
-        html += `<div class="ventanas"><span class="grupoEtq">${p.etqVentanas || "El precio"}, lo tuvieras o no</span>${celdas}</div>`;
+        html += `<div class="ventanas"><span class="grupoEtq">${esc(p.etqVentanas || "El precio")}, lo tuvieras o no</span>${celdas}</div>`;
       }
     }
     $("#ventanas").innerHTML = html;
@@ -871,9 +875,9 @@
       <header>
         <h2>Qué hay dentro</h2>
         <div class="sep"></div>
-        <span class="expoNota ${viejo ? "viejo" : ""}">${viejo ? "⚠ " : ""}Datos a ${G.fmtFecha(e.actualizado)}${viejo ? " · conviene refrescarlos" : ""}</span>
+        <span class="expoNota ${viejo ? "viejo" : ""}">${viejo ? "⚠ " : ""}Datos a ${esc(G.fmtFecha(e.actualizado))}${viejo ? " · conviene refrescarlos" : ""}</span>
       </header>
-      <p class="subt" style="margin:0 0 18px">${e.constituyentes ? e.constituyentes.toLocaleString("es-ES") + " empresas. " : ""}${e.fuente}. Datos del índice a la fecha indicada.</p>
+      <p class="subt" style="margin:0 0 18px">${e.constituyentes ? e.constituyentes.toLocaleString("es-ES") + " empresas. " : ""}${esc(e.fuente)}. Datos del índice a la fecha indicada.</p>
       <div class="expo">
         <div><h3>Por país</h3><div class="envGraf" id="expoPaises"></div></div>
         <div><h3>Por sector</h3><div class="envGraf" id="expoSectores"></div></div>
@@ -881,7 +885,7 @@
       ${e.top10 ? `<h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--tinta3);margin:24px 0 10px">
         Las 10 mayores posiciones · ${e.top10.reduce((a, x) => a + x[1], 0).toFixed(1)} % del fondo</h3>
         <div class="tablaEnv"><table class="dt"><tbody>${e.top10.map(x =>
-          `<tr><td>${x[0]}</td><td>${x[1].toLocaleString("es-ES", { minimumFractionDigits: 2 })} %</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+          `<tr><td>${esc(x[0])}</td><td>${x[1].toLocaleString("es-ES", { minimumFractionDigits: 2 })} %</td></tr>`).join("")}</tbody></table></div>` : ""}`;
     G.barrasHorizontales($("#expoPaises"), { datos: e.paises, color: color(p) });
     G.barrasHorizontales($("#expoSectores"), { datos: e.sectores, color: color(p) });
   }
@@ -897,7 +901,7 @@
     const esFondo = p.tipoClave === "fondo" || p.tipoClave === "pension";
     const paleta = tonos(color(p));
     const hoy = new Date(D.fechaExtracto);
-    const cab = ["Fecha", "Aportado", p.etqUnidades || "Participaciones",
+    const cab = ["Fecha", "Aportado", esc(p.etqUnidades || "Participaciones"),
       esFondo ? "VL de compra" : "Precio de compra", "Vale hoy", "Plusvalía", "Rent.", "Días"];
     sec.innerHTML = `<header><h2>Aportaciones a este producto</h2>
         <span class="subt">${filas.length} en total · ${G.fmtEur(p.aportado, 0)}</span></header>
@@ -952,7 +956,7 @@
         `<thead><tr><th>Producto</th>${ra.anos.map((a, i) =>
           `<th>${a}${ra.parcial[i] ? " *" : ""}</th>`).join("")}</tr></thead>
          <tbody>${prods.map(p => `<tr>
-           <td><i class="pt" style="background:${color(p)}"></i>${p.corto}</td>
+           <td><i class="pt" style="background:${color(p)}"></i>${esc(p.corto)}</td>
            ${tabla[p.id].map((v, i) => celda(v, (desde[p.id] || [])[i])).join("")}
          </tr>`).join("")}</tbody>` +
         (verProducto ? "" : `<tfoot><tr><td>Tu cartera</td>${ra.cartera.map(v =>
@@ -988,7 +992,7 @@
          <tbody>${comp.map((c, i) => {
           const m = c.metricas;
           return `<tr class="${c.real ? "destacada" : ""}">
-            <td><i class="pt" style="background:${series[i].color}"></i>${c.nombre}</td>
+            <td><i class="pt" style="background:${series[i].color}"></i>${esc(c.nombre)}</td>
             <td class="${m.rentTotal >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(m.rentTotal, 1)}</td>
             <td class="${m.cagr >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(m.cagr, 1)}</td>
             <td>${G.fmtPct(m.vol, 1)}</td>
@@ -1012,7 +1016,7 @@
       $("#tablaComisiones").innerHTML =
         `<thead><tr><th>Producto</th><th>Comisión</th><th>Sobre</th><th>Al año</th><th>Al mes</th></tr></thead>
          <tbody>${c.lineas.map(l => `<tr>
-            <td><i class="pt" style="background:${temaOscuro() ? l.color[1] : l.color[0]}"></i>${l.nombre}</td>
+            <td><i class="pt" style="background:${temaOscuro() ? l.color[1] : l.color[0]}"></i>${esc(l.nombre)}</td>
             <td>${G.fmtPct(l.ter, 2)}</td><td>${G.fmtEur(l.valor, 0)}</td>
             <td>${G.fmtEur(l.anual)}</td><td>${G.fmtEur(l.anual / 12)}</td></tr>`).join("")}</tbody>
          <tfoot><tr><td>Total</td><td>${G.fmtPct(c.terPonderado, 3)}</td>
@@ -1024,14 +1028,14 @@
   /* ---------------------------------------------- avisos y pie */
   function pintaComun() {
     $("#avisos").innerHTML = (D.avisos || [])
-      .map(a => `<div class="av"><span>⚠</span><span>${a}</span></div>`).join("");
+      .map(a => `<div class="av"><span>⚠</span><span>${esc(a)}</span></div>`).join("");
     const pa = D.preciosActualizados;
     const fuentes = [...new Set(D.productos.map(p => p.fuentePrecio).filter(Boolean))];
     $("#pie").innerHTML =
       `${pa ? `Precios actualizados el ${G.fmtFecha(pa.slice(0, 10))} a las ${pa.slice(11, 16)}` : "Precios sin actualizar"} ·
        datos valorados a ${G.fmtFecha(D.fechaExtracto)} ·
        ${D.total.diasInvertido} días invertido.<br>
-       Fuentes de precios: ${fuentes.join(", ") || "ninguna"}. En la pestaña Productos verás la de cada uno.<br>
+       Fuentes de precios: ${esc(fuentes.join(", ")) || "ninguna"}. En la pestaña Productos verás la de cada uno.<br>
        <b>Aviso:</b> herramienta informativa. No es asesoramiento financiero ni una recomendación de compra o venta.
        Los precios vienen de servicios públicos gratuitos y pueden tener errores o retrasos: no se garantiza su exactitud.`;
     if ($("#bannerDemo")) $("#bannerDemo").hidden = D.modo !== "demo";
