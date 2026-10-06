@@ -36,3 +36,29 @@ def test_graficos_js_no_interpola_nombres_sin_escapar():
         for m in re.finditer(pat, src):
             antes = src[max(0, m.start() - 40):m.start()]
             assert "esc(" in antes, f"{pat} sin esc() en graficos.js"
+
+def test_regla_de_oro_escapado():
+    """Toda interpolación ${...} que meta texto de datos en innerHTML debe ir con esc()."""
+    for archivo in ("app.js", "graficos.js"):
+        src = _js(archivo)
+        assert "const esc = " in src or "const esc =" in src, f"falta esc() en {archivo}"
+
+# Versión con lista blanca: documenta la intención del hallazgo F-01 del informe.
+# Cada lista es la whitelist de interpolaciones permitidas por archivo.
+BLANCA_APP = [
+    r"\$\{p\.corto\b", r"\$\{p\.nombre\b", r"\$\{d\.nombre\b",
+    r"\$\{r\.producto\b", r"\$\{l\.nombre\b", r"\$\{c\.nombre\b",
+    r"\$\{a\}</span>", r"\$\{D\.titular\b",
+    r"\$\{fuentes\.join",
+]
+
+BLANCA_GRAF = [r"\$\{s\.nombre\b", r"\$\{d\.nombre\b"]
+
+def test_whitelist_f01():
+    """F-01: solo las interpolaciones de la whitelist pueden aparecer sin esc()."""
+    for archivo, blanca in (("app.js", BLANCA_APP), ("graficos.js", BLANCA_GRAF)):
+        src = _js(archivo)
+        for pat in blanca:
+            for m in re.finditer(pat, src):
+                antes = src[max(0, m.start() - 40):m.start()]
+                assert "esc(" in antes, f"{pat} sin esc() en {archivo} (F-01)"
