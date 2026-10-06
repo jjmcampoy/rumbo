@@ -229,6 +229,118 @@ def test_borrar_la_ultima_cartera(cliente, entorno):
     assert r.status_code == 400
 
 
+def _cartera_cuatro(tmp_path):
+    """Siembra una cartera con cuatro productos (y sus movimientos y valores)."""
+    cfg = copy.deepcopy(CARTERA_MINIMA)
+    cfg["titular"] = "Principal"
+    cfg["productos"] = [
+        {"id": "bitcoin", "nombre": "Bitcoin", "corto": "Bitcoin", "tipo": "cripto",
+         "fuente": "coingecko", "codigo": "bitcoin", "moneda": "EUR", "slot": 1, "largoPlazo": True},
+        {"id": "world", "nombre": "World", "corto": "World", "tipo": "accion",
+         "fuente": "yahoo", "codigo": "WLD", "moneda": "EUR", "slot": 2, "largoPlazo": True},
+        {"id": "efectivo", "nombre": "Efectivo", "corto": "Efectivo", "tipo": "efectivo",
+         "fuente": "manual", "moneda": "EUR", "slot": 3, "largoPlazo": True},
+        {"id": "deuda", "nombre": "Deuda", "corto": "Deuda", "tipo": "deuda",
+         "fuente": "manual", "moneda": "EUR", "slot": 4, "largoPlazo": True},
+    ]
+    cfg["movimientos"] = [
+        {"id": "m1", "fecha": "2024-01-02", "producto": "bitcoin", "tipo": "compra",
+         "unidades": 1, "importe": 50000.0},
+        {"id": "m2", "fecha": "2024-01-03", "producto": "world", "tipo": "compra",
+         "unidades": 10, "importe": 1000.0},
+        {"id": "m3", "fecha": "2024-01-04", "producto": "efectivo", "tipo": "compra",
+         "unidades": 0, "importe": 2000.0},
+    ]
+    cfg["valoraciones"] = [
+        {"id": "v1", "fecha": "2024-01-05", "producto": "bitcoin", "valor": 51000.0},
+        {"id": "v2", "fecha": "2024-01-05", "producto": "efectivo", "valor": 2000.0},
+    ]
+    cfg["comparador"] = [
+        {"id": "real", "nombre": "Mi cartera real", "real": True},
+        {"id": "pesos", "nombre": "Mis pesos", "pesos": {"bitcoin": 50, "world": 30, "efectivo": 20}},
+    ]
+    escribe_json(os.path.join(tmp_path, "carteras", "principal.json"), cfg)
+    escribe_json(os.path.join(tmp_path, "carteras", "indice.json"),
+                 {"version": 1, "activa": "principal",
+                  "carteras": [{"id": "principal", "nombre": "Principal",
+                                "creada": "2024-01-01T00:00:00"}]})
+    return cfg
+
+
+def test_extraer_copia(cliente, entorno, monkeypatch):
+    """Extraer dos de cuatro productos (copia): la nueva tiene solo esos dos y el origen no cambia."""
+    servidor, tmp_path = entorno
+    _cache_sembrada(monkeypatch, tmp_path, ["bitcoin", "WLD"])
+    cfg = _cartera_cuatro(tmp_path)
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "Cripto", "productos": ["bitcoin", "world"]}, headers=CAB)
+    assert r.status_code == 200
+    cuerpo = r.get_json()
+    assert cuerpo["ok"] and cuerpo["origen"] == "principal"
+    assert cuerpo["movidos"] == 2
+    nueva = json.load(open(os.path.join(tmp_path, "carteras", cuerpo["cartera"]["id"] + ".json"),
+                           encoding="utf-8"))
+    assert [p["id"] for p in nueva["productos"]] == ["bitcoin", "world"]
+    assert [m["id"] for m in nueva["movimientos"]] == ["m1", "m2"]
+    assert [v["id"] for v in nueva["valoraciones"]] == ["v1"]
+    assert nueva["hitos"] == cfg["hitos"] and nueva["objetivo"] == cfg["objetivo"]
+    # El comparador conserva la entrada real y solo los pesos de los elegidos.
+    assert [c["id"] for c in nueva["comparador"]] == ["real", "pesos"]
+    assert nueva["comparador"][1]["pesos"] == {"bitcoin": 50, "world": 30}
+    # El origen no cambia.
+    a2 = json.load(open(os.path.join(tmp_path, "carteras", "principal.json"), encoding="utf-8"))
+    assert a2 == cfg
+
+
+def test_extraer_mover(cliente, entorno, monkeypatch):
+    """Extraer con mover=true: el origen pierde los productos y sus movimientos/valores."""
+    servidor, tmp_path = entorno
+    _cache_sembrada(monkeypatch, tmp_path, ["bitcoin", "WLD"])
+    cfg = _cartera_cuatro(tmp_path)
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "Cripto", "productos": ["bitcoin", "world"], "mover": True},
+                     headers=CAB)
+    assert r.status_code == 200
+    cuerpo = r.get_json()
+    assert cuerpo["ok"] and cuerpo["movidos"] == 2
+    nueva = json.load(open(os.path.join(tmp_path, "carteras", cuerpo["cartera"]["id"] + ".json"),
+                           encoding="utf-8"))
+    assert [p["id"] for p in nueva["productos"]] == ["bitcoin", "world"]
+    a2 = json.load(open(os.path.join(tmp_path, "carteras", "principal.json"), encoding="utf-8"))
+    assert [p["id"] for p in a2["productos"]] == ["efectivo", "deuda"]
+    assert [m["id"] for m in a2["movimientos"]] == ["m3"]
+    assert [v["id"] for v in a2["valoraciones"]] == ["v2"]
+    # Los pesos del origen solo refieren a productos existentes.
+    for c in a2["comparador"]:
+        if c.get("pesos"):
+            assert set(c["pesos"]) <= {p["id"] for p in a2["productos"]}
+    for c in nueva["comparador"]:
+        if c.get("pesos"):
+            assert set(c["pesos"]) <= {p["id"] for p in nueva["productos"]}
+
+
+def test_extraer_invalidos(cliente, entorno):
+    """Producto desconocido, lista vacía o origen desconocido: 400 y no se crea cartera."""
+    servidor, tmp_path = entorno
+    _cartera_cuatro(tmp_path)
+    antes = [c["id"] for c in carteras_lista(tmp_path)]
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "X", "productos": ["bitcoin", "noexiste"]}, headers=CAB)
+    assert r.status_code == 400 and r.get_json()["ok"] is False
+    r = cliente.post("/api/carteras/extraer", json={"nombre": "X", "productos": []}, headers=CAB)
+    assert r.status_code == 400 and r.get_json()["ok"] is False
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "X", "productos": ["bitcoin"], "desde": "noexiste"}, headers=CAB)
+    assert r.status_code == 400 and r.get_json()["ok"] is False
+    assert [c["id"] for c in carteras_lista(tmp_path)] == antes
+
+
+def carteras_lista(tmp_path):
+    """Las carteras del índice, para comprobar que no se creó ninguna de más."""
+    idx = json.load(open(os.path.join(tmp_path, "carteras", "indice.json"), encoding="utf-8"))
+    return idx["carteras"]
+
+
 def test_crear_en_demo_sale_de_la_demo(cliente, entorno):
     """Crear la primera cartera en modo demo la activa y sale de la demo."""
     servidor, tmp_path = entorno

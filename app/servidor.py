@@ -363,6 +363,36 @@ def api_crear_cartera():
                    carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
 
 
+@app.post("/api/carteras/extraer")
+def api_extraer_cartera():
+    """Extrae productos de una cartera a una cartera nueva (copia o movimiento)."""
+    if modo() == "demo":
+        return jsonify(ok=False, errores=[AVISO_DEMO]), 403
+    datos = request.get_json(silent=True) or {}
+    nombre = str(datos.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify(ok=False, errores=["Ponle un nombre a la cartera."]), 400
+    if len(nombre) > 60:
+        return jsonify(ok=False, errores=["El nombre es demasiado largo (máximo 60)."]), 400
+    ids = datos.get("productos")
+    if not isinstance(ids, list) or not ids:
+        return jsonify(ok=False, errores=["Elige al menos un producto para extraer."]), 400
+    desde = datos.get("desde") or _cid()
+    if not carteras.id_valido(desde):
+        return jsonify(ok=False, errores=["La cartera de origen no es válida."]), 400
+    if not carteras.existe(DATOS, desde):
+        return jsonify(ok=False, errores=["La cartera de origen no existe."]), 400
+    with cerrojo:
+        try:
+            nueva, origen = carteras.extrae(DATOS, desde, nombre, ids,
+                                            mover=bool(datos.get("mover")))
+        except carteras.ErrorCartera as e:
+            return jsonify(ok=False, errores=e.errores), 400
+        recalcula(descargar="faltan")
+    return jsonify(ok=True, cartera=nueva, origen=desde, movidos=nueva["productos"],
+                   carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
+
+
 @app.post("/api/carteras/<cid>/activar")
 def api_activar_cartera(cid):
     """Cambia la cartera activa; si su cálculo derivado está viejo, se limpia."""

@@ -13,7 +13,7 @@ import json
 import os
 import re
 
-from .almacen import CARTERA_VACIA, slug
+from .almacen import CARTERA_VACIA, borra_producto, guarda, slug
 
 CARPETA = "carteras"
 INDICE = "indice.json"
@@ -238,6 +238,63 @@ def nuevo_id(datos, nombre):
     while f"cartera_{i}" in existentes:
         i += 1
     return "cartera" if "cartera" not in existentes else f"cartera_{i}"
+
+
+# ---------------------------------------------------------------- extraer
+
+def extrae(datos, origen_cid, nombre, ids, mover=False):
+    """Crea una cartera nueva con los productos `ids` (y sus movimientos y valores).
+    Con mover=True los quita también del origen. Devuelve (nueva, origen_actualizado)."""
+    if not id_valido(origen_cid):
+        raise ErrorCartera(["La cartera de origen no es válida."])
+    if not existe(datos, origen_cid):
+        raise ErrorCartera(["La cartera de origen no existe."])
+    if not str(nombre or "").strip():
+        raise ErrorCartera(["Ponle un nombre a la cartera."])
+    nombre = str(nombre).strip()
+    if not isinstance(ids, list) or not ids:
+        raise ErrorCartera(["Elige al menos un producto para extraer."])
+    origen = _lee_json(ruta(datos, origen_cid), {})
+    if not origen:
+        raise ErrorCartera(["La cartera de origen no se puede leer."])
+    existentes = {p.get("id") for p in origen.get("productos", []) if isinstance(p, dict)}
+    desconocidos = [i for i in ids if i not in existentes]
+    if desconocidos:
+        raise ErrorCartera([f"Producto desconocido: «{d}»." for d in desconocidos])
+    nueva = copy.deepcopy(CARTERA_VACIA)
+    nueva["titular"] = nombre
+    nueva["productos"] = [copy.deepcopy(p) for p in origen["productos"] if p["id"] in ids]
+    nueva["movimientos"] = [copy.deepcopy(m) for m in origen.get("movimientos", [])
+                           if m.get("producto") in ids]
+    nueva["valoraciones"] = [copy.deepcopy(v) for v in origen.get("valoraciones", [])
+                            if v.get("producto") in ids]
+    nueva["hitos"] = copy.deepcopy(origen.get("hitos", []))
+    nueva["objetivo"] = copy.deepcopy(origen.get("objetivo", {}))
+    # El comparador conserva la entrada real y los pesos de los productos elegidos;
+    # se descartan las entradas de pesos que quedan vacías (como en borra_producto).
+    nueva["comparador"] = []
+    for c in origen.get("comparador", []):
+        if c.get("real"):
+            nueva["comparador"].append(copy.deepcopy(c))
+        elif c.get("pesos"):
+            pesos = {k: v for k, v in c["pesos"].items() if k in ids}
+            if pesos:
+                nueva["comparador"].append({**copy.deepcopy(c), "pesos": pesos})
+    # Primero se persiste la cartera nueva; solo después se toca el origen.
+    cid = nuevo_id(datos, nombre)
+    guarda(ruta(datos, cid), nueva, copias=os.path.join(datos, "copias", cid))
+    if mover:
+        for pid in ids:
+            borra_producto(origen, pid)
+        guarda(ruta(datos, origen_cid), origen,
+               copias=os.path.join(datos, "copias", origen_cid))
+    idx = lee_indice(datos)
+    idx["carteras"].append({"id": cid, "nombre": nombre,
+                            "creada": dt.datetime.now().replace(microsecond=0).isoformat()})
+    if idx.get("activa") is None:
+        idx["activa"] = cid
+    escribe_indice(datos, idx)
+    return {"id": cid, "nombre": nombre, "productos": len(nueva["productos"])}, origen
 
 
 # ---------------------------------------------------------------- migración
