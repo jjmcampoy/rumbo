@@ -73,13 +73,33 @@ def test_resultado_fiscal_no_es_un_reembolso():
 
 def test_reembolso_cero_cero():
     """
-    Forma aún no observada en un archivo real (ver paso 4 de I-01): una fila
-    0,00;0,00 con resultado fiscal se lee como reembolso. Documenta la única
-    forma que el código actual reconoce.
+    Rama de reembolso que el código reconoce: una fila 0,00;0,00 con un
+    Resultado fiscal distinto de cero se lee como reembolso. Esta forma NO se ha
+    observado en el extracto real del usuario: sus únicas filas a cero traen las
+    tres columnas a cero (`14/03/2022;0;0;0`) y se ignoran (prueba siguiente).
     """
     lotes, reembolsos, _ = importar.leer_csv_myinvestor(csv(lote("2022-05-04", 0.0, 0.0, 123.45)))
     assert lotes == []
     assert reembolsos == [["2022-05-04", 123.45]]
+
+
+def test_fila_real_todo_cero_se_ignora():
+    """
+    Fila real del extracto del usuario, tal cual: `14/03/2022;0;0;0`. Con
+    Inversión, Valor de mercado Y Resultado fiscal a cero no hay lote, no hay
+    reembolso y no es un error de fecha: se ignora en silencio (hoy cae porque
+    `num_es("0")` es falso) y no genera ningún movimiento.
+    """
+    texto = CABECERA + "14/03/2022;0;0;0\n"
+    lotes, reembolsos, sin_fecha = importar.leer_csv_myinvestor(texto)
+    assert lotes == []
+    assert reembolsos == []
+    assert sin_fecha == []
+    movs, avisos, recon = importar.myinvestor_a_movimientos(
+        "fondo", lotes, reembolsos, serie({"2022-05-04": 20.0}))
+    assert movs == []
+    assert recon["plusvaliasRealizadas"] == {"n": 0, "importe": 0.0, "desde": None, "hasta": None}
+    assert not any("plusvalías ya realizadas" in a for a in avisos)
 
 
 # ---------------------------------------------------------------- unidades
@@ -191,11 +211,17 @@ def test_dos_lotes_coherentes_sin_cambios():
 
 
 def test_sin_vl_actual():
-    """Sin serie VL y sin valor de mercado usable: 0 unidades y aviso, sin excepción."""
+    """
+    Inversión > 0 y Valor de mercado = 0 sin serie VL: la fila se trata como
+    reembolso (lote que ya no se tiene) y, por la decisión de I-08, un reembolso
+    no genera movimiento; además falta el VL actual y se avisa.
+    """
     texto = csv(lote("2022-05-04", 1000.0, 0.0))
-    movs, avisos, _ = importar_lote(texto, {})
-    assert movs[0]["unidades"] == 0
+    movs, avisos, recon = importar_lote(texto, {})
+    assert [m for m in movs if m["tipo"] == "compra"] == []
+    assert movs == []              # sin VL no se inventan participaciones ni ventas
     assert any("valor liquidativo actual" in a for a in avisos)
+    assert recon["plusvaliasRealizadas"]["n"] == 1
 
 
 # ---------------------------------------------------------------- fechas y cabeceras (I-03)
@@ -393,6 +419,66 @@ def test_importar_myinvestor_dos_veces(entorno, monkeypatch):
     assert segundo["añadidos"] == n
     assert segundo["repetidos"] == 0
     assert cfg == copia
+
+
+# ---------------------------------------------------------------- reembolsos informativos (I-08)
+
+def test_reembolso_no_genera_movimiento():
+    """
+    Un lote que se sigue teniendo más una fila de reembolso: solo se importa la
+    compra. La plusvalía ya realizada va a la reconciliación y a los avisos,
+    nunca a `movs`: MyInvestor no da ni el importe cobrado ni la fecha de venta.
+    """
+    texto = csv(lote("2022-05-04", 1000.0, 1200.0, 200.0),
+                lote("2022-03-01", 0.0, 0.0, 123.45))
+    movs, avisos, recon = importar_lote(texto, serie({"2022-05-04": 20.0}))
+    assert len(movs) == 1
+    assert movs[0]["tipo"] == "compra"
+    assert recon["plusvaliasRealizadas"] == {"n": 1, "importe": 123.45,
+                                             "desde": "2022-03-01", "hasta": "2022-03-01"}
+    assert any("plusvalías ya realizadas" in a for a in avisos)
+
+
+def test_reimportar_borra_la_venta_fantasma(entorno, monkeypatch):
+    """
+    Regresión sobre datos ya importados con el código anterior: la venta
+    fantasma (unidades 0, importe = plusvalía, origen myinvestor) desaparece al
+    reimportar el mismo fondo y no se recrea.
+    """
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    cfg["movimientos"] = [{"id": "vieja", "fecha": "2022-03-01", "producto": "fondo",
+                           "tipo": "venta", "unidades": 0, "importe": 123.45,
+                           "origen": "myinvestor"}]
+    texto = csv(lote("2022-05-04", 1000.0, 1200.0, 200.0),
+                lote("2022-03-01", 0.0, 0.0, 123.45))
+    plan = plan_myinvestor(cfg, datos_dir, ARCHIVO, texto)
+    informe = importar.aplicar(cfg, plan)
+    assert informe["sustituidos"] == 1
+    assert cfg["movimientos"] and all(m["tipo"] == "compra" for m in cfg["movimientos"])
+
+
+def test_importar_reembolso_no_es_una_venta(entorno, monkeypatch):
+    """
+    Extremo a extremo: el extracto con una fila de reembolso no añade ninguna
+    venta, `totales["ventas"]` queda a 0 (el importe se muestra en la
+    reconciliación) y `motor.construir` no avisa de sobreventa.
+    """
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    texto = csv(lote("2022-05-04", 1000.0, 1200.0, 200.0),
+                lote("2022-03-01", 0.0, 0.0, 123.45))
+    plan = plan_myinvestor(cfg, datos_dir, ARCHIVO, texto)
+    informe = importar.aplicar(cfg, plan)
+    assert not any(m["tipo"] == "venta" for m in cfg["movimientos"])
+    assert informe["totales"]["ventas"] == 0
+    assert len(informe["reconciliacion"]) == 1
+    pr = informe["reconciliacion"][0]["plusvaliasRealizadas"]
+    assert pr["n"] == 1 and pr["importe"] == 123.45
+    datos = motor.construir(cfg, str(datos_dir), descargar=False)
+    assert not any("vendes más unidades" in a for a in datos["avisos"])
 
 
 # ---------------------------------------------------------------- avisos de coherencia (I-07)

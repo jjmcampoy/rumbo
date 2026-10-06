@@ -673,6 +673,10 @@
       const avisos = [];
       if (r.sospechosos > 0) avisos.push(`${r.sospechosos} compras de otro fondo (traspaso)`);
       if (d > 0.05) avisos.push("Revisa este fondo antes de confirmar");
+      // Plusvalías ya realizadas del extracto: se muestran como aviso, nunca como
+      // movimientos, porque MyInvestor no da la fecha de venta.
+      const pr = r.plusvaliasRealizadas;
+      if (pr && pr.n > 0) avisos.push(`${pr.n} plusvalías ya realizadas del extracto: ${num(pr.importe, 2)} € — no se importan (MyInvestor no da la fecha de venta)`);
       const aviso = avisos.join(" · ");
       return `<tr class="est-recon-${clase}"><td style="text-align:left">${esc(r.nombre)}</td>
         <td>${eur(r.invertido)}</td><td>${eur(r.valorExtracto)}</td><td>${eur(r.valorCalculado)}</td>

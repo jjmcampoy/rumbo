@@ -29,6 +29,16 @@ def test_preview_muestra_reconciliacion():
     assert "eur(r.desvio)" not in src
 
 
+def test_preview_muestra_plusvalias_realizadas():
+    """La vista previa avisa de las plusvalías ya realizadas del extracto (I-08)."""
+    src = open(os.path.join(WEB, "editor.js"), encoding="utf-8").read()
+    # Se lee del informe y solo se pinta cuando hay alguna (n > 0).
+    assert "r.plusvaliasRealizadas" in src
+    assert "pr.n > 0" in src
+    assert "plusvalías ya realizadas del extracto" in src
+    assert "no se importan (MyInvestor no da la fecha de venta)" in src
+
+
 def test_aplicar_devuelve_reconciliacion(entorno, monkeypatch):
     """aplicar() incluye la reconciliación del plan y el caso I-A cuadra a <1 %."""
     _, datos_dir = entorno

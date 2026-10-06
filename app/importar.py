@@ -192,12 +192,19 @@ def myinvestor_a_movimientos(producto_id, lotes, reembolsos, serie_vl):
         movs.append({"fecha": fecha, "producto": producto_id, "tipo": "compra",
                      "unidades": round(unidades, 6), "importe": coste,
                      "nota": "MyInvestor (posible traspaso)" if sospechoso else "MyInvestor"})
-    for fecha, resultado in reembolsos:
-        # Del reembolso solo se conoce la plusvalía: se anota como una venta de 0
-        # participaciones que cobra ese resultado.
-        movs.append({"fecha": fecha, "producto": producto_id, "tipo": "venta",
-                     "unidades": 0, "importe": resultado,
-                     "nota": "Plusvalía de un reembolso (MyInvestor no da la fecha de venta)"})
+    # Los reembolsos NO se convierten en movimientos: del reembolso solo se
+    # conoce la plusvalía, no el importe cobrado ni la fecha de venta (el
+    # extracto solo da la fecha fiscal del lote comprado), así que anotarlos
+    # como ventas inventaba un cobro con fecha de años atrás. Se reportan en la
+    # reconciliación y en los avisos.
+    reembolsos_info = {"n": len(reembolsos), "importe": round(sum(r for _, r in reembolsos), 2),
+                       "desde": min((f for f, _ in reembolsos), default=None),
+                       "hasta": max((f for f, _ in reembolsos), default=None)}
+    if reembolsos_info["n"]:
+        avisos.append(f"El extracto reporta {reembolsos_info['n']} plusvalías ya realizadas por "
+                      f"{reembolsos_info['importe']:.2f} € de lotes que ya no tienes. "
+                      "MyInvestor no da la fecha de venta, así que no se importan como movimientos: no aparecerán en "
+                      "«plusvalía ya materializada».")
 
     # Recalibrado (una sola vez, para todo el fondo): que el valor calculado cuadre
     # con el valor total del extracto, que es el número que el usuario comprueba.
@@ -225,7 +232,8 @@ def myinvestor_a_movimientos(producto_id, lotes, reembolsos, serie_vl):
     reconciliacion = {"invertido": invertido, "valorExtracto": valor_total,
                       "valorCalculado": calculado, "desvio": round(k - 1, 4),
                       "sospechosos": sospechosos, "lotes": len(lotes),
-                      "vlActual": round(vl_actual, 4) if vl_actual else None}
+                      "vlActual": round(vl_actual, 4) if vl_actual else None,
+                      "plusvaliasRealizadas": reembolsos_info}
     return movs, avisos, reconciliacion
 
 
