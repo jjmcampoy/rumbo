@@ -372,6 +372,7 @@
 
     const totales = cats.map((_, i) => series.reduce((a, s) => a + (s.valores[i] || 0), 0));
     const esc = escalaBonita(Math.max(...totales), 0);
+    const fV = cfg.formatoValor || fmtEur;   // el tooltip la usaba sin definirla
     const paso = iw / n;
     const ancho = Math.max(4, Math.min(paso - 6, 46));
     const y = v => P.t + ih - (v / esc.max) * ih;
