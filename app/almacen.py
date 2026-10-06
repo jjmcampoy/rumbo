@@ -34,6 +34,64 @@ class ErrorValidacion(Exception):
         self.errores = errores
 
 
+MAX_PRODUCTOS = 10000
+MAX_MOVIMIENTOS = 200000
+ID_VALIDO = re.compile(r"^[A-Za-z0-9_]{1,40}$")
+FECHA_VALIDA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+TIPOS_MOV_VALIDOS = tuple(TIPOS_MOV)          # compra, venta, dividendo, comision
+
+def valida_cartera(cfg):
+    """Comprueba la ESTRUCTURA de una cartera (copia de seguridad). Devuelve lista de errores."""
+    errores = []
+    if not isinstance(cfg, dict):
+        return ["El archivo no es una cartera."]
+    for k in ("productos", "movimientos", "valoraciones"):
+        if not isinstance(cfg.get(k), list):
+            errores.append(f"Falta la lista «{k}».")
+    if errores:
+        return errores
+    if len(cfg["productos"]) > MAX_PRODUCTOS:
+        errores.append(f"Demasiados productos (máximo {MAX_PRODUCTOS}).")
+    if len(cfg["movimientos"]) > MAX_MOVIMIENTOS:
+        errores.append(f"Demasiados movimientos (máximo {MAX_MOVIMIENTOS}).")
+    ids = set()
+    for i, p in enumerate(cfg["productos"]):
+        if not isinstance(p, dict) or not ID_VALIDO.match(str(p.get("id") or "")):
+            errores.append(f"Producto {i + 1}: falta un identificador válido.")
+            continue
+        if p["id"] in ids:
+            errores.append(f"Producto {i + 1}: identificador repetido «{p['id']}».")
+        ids.add(p["id"])
+        if not isinstance(p.get("nombre"), str) or not p["nombre"].strip():
+            errores.append(f"Producto {i + 1}: falta el nombre.")
+        if p.get("tipo") not in TIPOS:
+            errores.append(f"Producto {i + 1}: tipo desconocido «{p.get('tipo')}».")
+    for i, m in enumerate(cfg["movimientos"]):
+        if not isinstance(m, dict):
+            errores.append(f"Movimiento {i + 1}: no es un objeto.")
+            continue
+        if m.get("producto") not in ids:
+            errores.append(f"Movimiento {i + 1}: producto desconocido.")
+        if m.get("tipo") not in TIPOS_MOV_VALIDOS:
+            errores.append(f"Movimiento {i + 1}: tipo desconocido.")
+        if not FECHA_VALIDA.match(str(m.get("fecha") or "")):
+            errores.append(f"Movimiento {i + 1}: fecha no válida.")
+        if not isinstance(m.get("importe"), (int, float)):
+            errores.append(f"Movimiento {i + 1}: importe no numérico.")
+    for i, v in enumerate(cfg["valoraciones"]):
+        if not isinstance(v, dict):
+            errores.append(f"Valoración {i + 1}: no es un objeto.")
+            continue
+        if v.get("producto") not in ids:
+            errores.append(f"Valoración {i + 1}: producto desconocido.")
+        if not FECHA_VALIDA.match(str(v.get("fecha") or "")):
+            errores.append(f"Valoración {i + 1}: fecha no válida.")
+        if not isinstance(v.get("valor"), (int, float)):
+            errores.append(f"Valoración {i + 1}: valor no numérico.")
+    return errores[:50]        # no devolver 10.000 errores a la interfaz
+
+
 # ---------------------------------------------------------------- disco
 
 def carga(ruta):

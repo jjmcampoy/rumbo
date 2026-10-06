@@ -334,9 +334,9 @@ def ruta_copias():
 
 def valida_copia(cfg):
     """Comprueba que un JSON tiene pinta de cartera de esta app."""
-    if not isinstance(cfg, dict) or not all(isinstance(cfg.get(k), list)
-                                            for k in ("productos", "movimientos", "valoraciones")):
-        raise almacen.ErrorValidacion(["Ese archivo no es una copia de seguridad de esta app."])
+    errores = almacen.valida_cartera(cfg)
+    if errores:
+        raise almacen.ErrorValidacion(errores)
     return cfg
 
 
