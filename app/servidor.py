@@ -36,6 +36,20 @@ app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False   # respeta el orden de tipos y listas al mandarlos al navegador
 cerrojo = threading.RLock()  # el motor no admite dos cálculos (ni dos escrituras) a la vez
 
+# Cabeceras de seguridad para todas las respuestas (ver 01-security-analysis.md).
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; "
+       "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+
+@app.after_request
+def cabeceras_seguridad(resp):
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    resp.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    return resp
+
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024      # 25 MB por petición
 MAX_ARCHIVOS = 50
 MAX_FILAS = 50000

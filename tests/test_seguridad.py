@@ -94,3 +94,18 @@ def test_ping_con_host_malo_es_421(cliente):
 def test_ping_con_host_local_es_200(cliente):
     r = cliente.get("/api/ping", headers={"Host": "127.0.0.1:8799"})
     assert r.status_code == 200
+
+# ---------------------------------------------------------------- cabeceras (F-06)
+
+def test_cabeceras(cliente):
+    r = cliente.get("/")
+    assert r.status_code == 200
+    csp = r.headers["Content-Security-Policy"]
+    assert "script-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "'unsafe-eval'" not in csp
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+
+def test_csp_sin_origenes_externos(cliente):
+    csp = cliente.get("/").headers["Content-Security-Policy"]
+    assert "coingecko" not in csp and "binance" not in csp
