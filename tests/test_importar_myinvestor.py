@@ -6,9 +6,14 @@ Los tests marcados con xfail(strict=True) documentan los defectos que I-02 e
 I-03 deben corregir: cuando la corrección llegue y se retire la marca, deben
 pasar. Los tests que pasan hoy fijan el comportamiento que no debe cambiar.
 """
+import copy
+import os
+import re
+
 import pytest
 
-from app import importar, motor
+from app import almacen, importar, motor
+from tests.conftest import escribe_cache
 
 HOY = motor.hoy().isoformat()
 VL_HOY = 40.0
@@ -280,3 +285,111 @@ def test_nota_por_lote_no_por_contador():
     assert compras[0]["nota"] == "MyInvestor (posible traspaso)"
     assert compras[1]["nota"] == "MyInvestor"
     assert recon["sospechosos"] == 1
+
+
+# ---------------------------------------------------------------- duplicados y origen (I-04)
+
+ISIN = "TEST12345678"
+ARCHIVO = "TEST123456789.csv"
+
+
+def cartera_fondo(datos_dir):
+    """Cartera mínima con un fondo cotizado y su serie VL sembrada en la caché."""
+    cfg = {"productos": [{"id": "fondo", "nombre": "Fondo Test", "corto": "Fondo Test",
+                          "tipo": "fondo", "fuente": "yahoo", "codigo": ISIN, "moneda": "EUR"}],
+           "movimientos": [], "valoraciones": []}
+    escribe_cache(datos_dir, ISIN, {"2022-05-04": 20.0, HOY: 40.0})
+    return cfg
+
+
+def descarga_de_la_cache(datos_dir, monkeypatch):
+    """descargar_serie simulado que lee la caché sembrada (patrón de tests/test_motor.py)."""
+    def _lee(simbolo, anos=None):
+        ruta = os.path.join(str(datos_dir), "cache",
+                            re.sub(r"[^A-Za-z0-9._-]", "_", simbolo) + ".json")
+        return motor.lee_cache(ruta)
+    monkeypatch.setattr(motor, "descargar_serie", _lee)
+
+
+def plan_myinvestor(cfg, datos_dir, nombre, texto):
+    return importar.preparar_myinvestor(cfg, [(nombre, texto.encode("utf-8"))], str(datos_dir))
+
+
+def test_dos_filas_identicas_en_un_plan(entorno):
+    """Dos filas idénticas del mismo plan: una se añade, la otra cuenta como repetida."""
+    _, datos_dir = entorno
+    cfg = cartera_fondo(datos_dir)
+    filas = [(n, {"fecha": "2022-05-04", "tipo_movimiento": "compra", "identificador": ISIN,
+                  "unidades": "10", "importe": "200"}) for n in (1, 2)]
+    plan = importar.preparar_tabla(cfg, filas, str(datos_dir))
+    informe = importar.aplicar(cfg, plan)
+    assert informe["añadidos"] == 1
+    assert informe["repetidos"] == 1
+
+
+def test_repetir_el_mismo_plan_no_infla(entorno):
+    """Reaplicar el mismo plan sin reemplazo: el movimiento ya está y cuenta como repetido."""
+    _, datos_dir = entorno
+    cfg = cartera_fondo(datos_dir)
+    filas = [(1, {"fecha": "2022-05-04", "tipo_movimiento": "compra", "identificador": ISIN,
+                  "unidades": "10", "importe": "200"})]
+    plan = importar.preparar_tabla(cfg, filas, str(datos_dir))
+    primero = importar.aplicar(cfg, plan)
+    assert primero["añadidos"] == 1
+    plan2 = importar.preparar_tabla(cfg, filas, str(datos_dir))
+    segundo = importar.aplicar(cfg, plan2)
+    assert segundo["añadidos"] == 0
+    assert segundo["repetidos"] == 1
+    assert segundo["sustituidos"] == 0
+    assert len(cfg["movimientos"]) == 1
+
+
+def test_mismo_isin_en_dos_archivos(entorno):
+    """El mismo ISIN en dos archivos: el plan trae un error con ambos nombres y no añade nada."""
+    _, datos_dir = entorno
+    cfg = cartera_fondo(datos_dir)
+    plan = importar.preparar_myinvestor(
+        cfg, [("TEST123456789.csv", EXTRACTO_REAL.encode("utf-8")),
+              ("TEST123456789_v2.csv", EXTRACTO_REAL.encode("utf-8"))], str(datos_dir))
+    assert any("TEST123456789.csv" in e["mensaje"] and "TEST123456789_v2.csv" in e["mensaje"]
+               for e in plan.errores)
+    assert plan.movimientos == []
+    informe = importar.aplicar(cfg, plan)
+    assert informe["añadidos"] == 0
+
+
+def test_editar_movimiento_importado_conserva_el_origen(entorno, monkeypatch):
+    """Editar un movimiento importado por MyInvestor conserva su origen y el reimport sustituye."""
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    plan = plan_myinvestor(cfg, datos_dir, ARCHIVO, EXTRACTO_REAL)
+    importar.aplicar(cfg, plan)
+    mov = cfg["movimientos"][0]
+    assert mov["origen"] == "myinvestor"
+    almacen.guarda_movimiento(cfg, {"id": mov["id"], "producto": "fondo", "tipo": "compra",
+                                    "fecha": mov["fecha"], "importe": 999.0, "unidades": mov["unidades"]})
+    assert cfg["movimientos"][0]["origen"] == "myinvestor"
+    plan2 = plan_myinvestor(cfg, datos_dir, ARCHIVO, EXTRACTO_REAL)
+    informe = importar.aplicar(cfg, plan2)
+    assert informe["añadidos"] == 1
+    assert informe["repetidos"] == 0
+    assert informe["sustituidos"] == 1
+    assert len(cfg["movimientos"]) == 1
+
+
+def test_importar_myinvestor_dos_veces(entorno, monkeypatch):
+    """Idempotencia: importar dos veces el mismo extracto deja la cartera igual."""
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    plan = plan_myinvestor(cfg, datos_dir, ARCHIVO, EXTRACTO_REAL)
+    primero = importar.aplicar(cfg, plan)
+    n = primero["añadidos"]
+    copia = copy.deepcopy(cfg)
+    plan2 = plan_myinvestor(cfg, datos_dir, ARCHIVO, EXTRACTO_REAL)
+    segundo = importar.aplicar(cfg, plan2)
+    assert segundo["sustituidos"] > 0
+    assert segundo["añadidos"] == n
+    assert segundo["repetidos"] == 0
+    assert cfg == copia

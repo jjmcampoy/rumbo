@@ -327,8 +327,10 @@ def guarda_movimiento(cfg, datos):
     lista = cfg.setdefault("movimientos", [])
     existente = next((m for m in lista if m.get("id") == datos.get("id")), None) if datos.get("id") else None
     if existente:
+        # Se conservan los campos que el formulario no toca (el origen, etc.).
+        conserva = {k: v for k, v in existente.items() if k not in mov and k not in ("id",)}
         existente.clear()
-        existente.update(id=datos["id"], **mov)
+        existente.update(id=datos["id"], **conserva, **mov)
         return existente
     mov = {"id": siguiente_id(lista, "m"), **mov}
     lista.append(mov)
@@ -364,8 +366,10 @@ def guarda_valoracion(cfg, datos):
     existente = existente or next((v for v in lista if v["producto"] == p["id"] and v["fecha"] == f), None)
     if existente:
         vid = existente["id"]
+        # Se conservan los campos que el formulario no toca (el origen, etc.).
+        conserva = {k: v for k, v in existente.items() if k not in val and k not in ("id",)}
         existente.clear()
-        existente.update(id=vid, **val)
+        existente.update(id=vid, **conserva, **val)
         return existente
     val = {"id": siguiente_id(lista, "v"), **val}
     lista.append(val)

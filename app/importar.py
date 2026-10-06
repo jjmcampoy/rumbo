@@ -503,6 +503,18 @@ def preparar_myinvestor(cfg, archivos, carpeta):
     importó antes de ese fondo, porque el extracto siempre trae la foto completa."""
     plan = Plan()
     res = Resolutor(cfg, plan, carpeta)
+    # Un ISIN en más de un archivo no se puede mezclar: se descartan TODOS sus
+    # archivos antes de construir el plan, para que «aplicar» no añada nada.
+    vistos, duplicados = {}, set()
+    for nombre, _ in archivos:
+        m = re.search(r"([A-Z]{2}[A-Z0-9]{9}\d)", (nombre or "").upper())
+        if not m:
+            continue
+        isin = m.group(1)
+        if isin in vistos:
+            duplicados.add(isin)
+        else:
+            vistos[isin] = nombre
     for nombre, contenido in archivos:
         m = re.search(r"([A-Z]{2}[A-Z0-9]{9}\d)", (nombre or "").upper())
         if not m:
@@ -510,6 +522,11 @@ def preparar_myinvestor(cfg, archivos, carpeta):
                                "MyInvestor sin cambiarle el nombre (lleva el ISIN del fondo).")
             continue
         isin = m.group(1)
+        if isin in duplicados:
+            if nombre != vistos[isin]:
+                plan.error(nombre, f"El ISIN {isin} viene en más de un archivo "
+                                   f"({vistos[isin]} y {nombre}): sube solo el extracto más reciente de cada fondo.")
+            continue
         lotes, reembolsos, sin_fecha = leer_csv_myinvestor(contenido)
         for n, texto_fecha in sin_fecha:
             plan.error(nombre, f"Fila {n}: la fecha «{texto_fecha}» no se entiende. "
@@ -536,7 +553,8 @@ def preparar_myinvestor(cfg, archivos, carpeta):
         plan.avisos.extend(avisos)
         plan.reconciliacion.append({**recon, "isin": isin, "producto": ref,
                                     "nombre": p.get("corto") or p.get("nombre")})
-        plan.reemplazar.append((ref, "myinvestor"))
+        if (ref, "myinvestor") not in plan.reemplazar:
+            plan.reemplazar.append((ref, "myinvestor"))
         for mv in movs:
             plan.movimientos.append({**mv, "fila": nombre, "comision": None, "marcas": [],
                                      "origen": "myinvestor"})
@@ -571,13 +589,15 @@ def aplicar(cfg, plan):
         datos = {k: mv[k] for k in ("fecha", "tipo", "unidades", "importe", "comision", "nota") if mv.get(k) is not None}
         datos["producto"] = real(mv["producto"])
         estado = "nuevo"
-        if firma({**datos, "unidades": datos.get("unidades", 0)}) in existentes:
+        nuevo = firma({**datos, "unidades": datos.get("unidades", 0)})
+        if nuevo in existentes:
             duplicados += 1
             estado = "repetido"
         else:
             try:
                 guardado = almacen.guarda_movimiento(cfg, datos)
                 guardado["origen"] = mv["origen"]
+                existentes.add(nuevo)          # que la siguiente fila idéntica cuente como repetida
                 añadidos += 1
             except almacen.ErrorValidacion as e:
                 errores.append({"fila": mv["fila"], "mensaje": " ".join(e.errores)})
