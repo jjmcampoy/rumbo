@@ -8,7 +8,8 @@
   const $ = s => document.querySelector(s);
   const D = window.DATOS;
   const SOLO_SALDO = ["efectivo", "deuda"];
-  const E = { cfg: null, modo: "demo", tipos: {}, fuentes: {}, tiposMov: {}, vista: "productos", filtro: "todos" };
+  const E = { cfg: null, modo: "demo", tipos: {}, fuentes: {}, tiposMov: {}, vista: "productos", filtro: "todos",
+              carteras: [], activa: null };
 
   /* ---------------------------------------------- utilidades */
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -47,7 +48,32 @@
   }
   async function carga() {
     const j = await api("GET", "api/cartera");
-    Object.assign(E, { cfg: j.cartera, modo: j.modo, tipos: j.tipos, fuentes: j.fuentes, tiposMov: j.tiposMovimiento });
+    Object.assign(E, { cfg: j.cartera, modo: j.modo, tipos: j.tipos, fuentes: j.fuentes, tiposMov: j.tiposMovimiento,
+                       carteras: j.carteras || [], activa: (j.carteraActiva || {}).id || null });
+    pintaSelector();
+  }
+  /* Selector de cartera de la barra superior: se rellena desde el catálogo y
+     solo se muestra cuando hay al menos una cartera propia. */
+  function pintaSelector() {
+    const sel = $("#selCartera");
+    if (!sel) return;
+    if (!E.carteras.length) { sel.hidden = true; return; }
+    sel.innerHTML = E.carteras.map(c =>
+      `<option value="${esc(c.id)}"${c.id === E.activa ? " selected" : ""}>${esc(c.nombre)}</option>`).join("") +
+      '<option value="__nueva__">➕ Nueva cartera…</option>';
+    sel.hidden = false;
+    sel.onchange = async () => {
+      if (sel.value === "__nueva__") {
+        E.vista = "carteras"; recuerda.guarda("patrimonio.editor", "carteras");
+        pinta();
+        pintaSelector();   // el selector vuelve a mostrar la cartera activa
+        return;
+      }
+      try {
+        await api("POST", `api/carteras/${encodeURIComponent(sel.value)}/activar`);
+        location.reload();
+      } catch (x) { alert(x.message); }
+    };
   }
   async function guarda(coleccion, datos) {
     const j = await api("POST", "api/" + coleccion, datos);
@@ -165,7 +191,7 @@
       <div id="edAvisos" class="avisos"></div><div id="edCuerpo"></div>`;
     cont.innerHTML = html;
 
-    const vistas = [["productos", "Productos"], ["movimientos", "Movimientos"], ["saldos", "Saldos y valores"], ["importar", "Importar"], ["copias", "Copias y web"]];
+    const vistas = [["productos", "Productos"], ["movimientos", "Movimientos"], ["saldos", "Saldos y valores"], ["importar", "Importar"], ["carteras", "Portfolios"], ["copias", "Copias y web"]];
     const seg = $("#edVistas");
     vistas.forEach(([id, et]) => {
       const b = document.createElement("button");
@@ -175,7 +201,7 @@
       seg.appendChild(b);
     });
     $("#edCuerpo").innerHTML = ({ productos: vistaProductos, movimientos: vistaMovimientos, saldos: vistaSaldos,
-      importar: vistaImportar, copias: vistaCopias }[E.vista] || vistaProductos)();
+      importar: vistaImportar, carteras: vistaCarteras, copias: vistaCopias }[E.vista] || vistaProductos)();
     if (E.vista === "importar" || E.vista === "copias") conectaImportar();
     const filtro = $("#edFiltro");
     if (filtro) filtro.onchange = e => { E.filtro = e.target.value; pinta(); };
@@ -735,6 +761,136 @@
     }
   }
 
+  /* ---------------------------------------------- portfolios */
+  const CAR = { lista: null, hayEjemplo: null };
+
+  function vistaCarteras() {
+    if (CAR.lista === null) {
+      api("GET", "api/carteras").then(j => { CAR.lista = j.carteras; if (E.vista === "carteras") pinta(); });
+    }
+    if (CAR.hayEjemplo === null) {
+      // El ejemplo existe si la app está en modo demo (aún no hay cartera propia).
+      CAR.hayEjemplo = E.modo === "demo";
+    }
+    const lista = CAR.lista || [];
+    const filas = lista.map(c => `<tr>
+      <td style="text-align:left">${esc(c.nombre)}${c.activa ? ' <small>(activa)</small>' : ""}</td>
+      <td>${c.productos ?? "—"}</td><td>${fecha((c.creada || "").slice(0, 10))}</td>
+      <td class="acc">
+        ${c.activa ? "" : `<button data-acc="carteraActivar" data-id="${esc(c.id)}">Activar</button>`}
+        <button data-acc="carteraRenombrar" data-id="${esc(c.id)}">Renombrar</button>
+        <button data-acc="carteraDuplicar" data-id="${esc(c.id)}">Duplicar</button>
+        <button data-acc="carteraBorrar" data-id="${esc(c.id)}">Borrar</button></td></tr>`).join("");
+    const productos = (E.cfg.productos || []).map(p =>
+      `<label class="opcion"><input type="checkbox" name="prod" value="${esc(p.id)}">
+        <span><b>${esc(nombre(p))}</b></span></label>`).join("");
+    return `<section class="tarjeta"><header><h2>Portfolios</h2>
+        <span class="subt">Crea, renombra, duplica o borra carteras, y extrae productos de una a otra.</span></header>
+      ${CAR.lista === null ? '<p class="cargando">Cargando…</p>'
+        : `<div class="tablaEnv alto"><table class="dt"><thead><tr><th style="text-align:left">Nombre</th>
+          <th>Productos</th><th>Creada</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`}
+      </section>
+
+      <section class="tarjeta"><header><h2>Nueva cartera</h2>
+        <span class="subt">Vacía, o como copia de otra cartera o del ejemplo.</span></header>
+      <form id="formNuevaCartera" novalidate>
+        <label class="campo"><span>Nombre</span><input name="nombre" maxlength="60" required placeholder="Mi cartera"></label>
+        <label class="campo"><span>Origen</span>
+          <select name="desde">
+            <option value="vacia">Vacía</option>
+            ${lista.map(c => `<option value="${esc(c.id)}">Copia de ${esc(c.nombre)}</option>`).join("")}
+            ${CAR.hayEjemplo ? '<option value="ejemplo">Copia del ejemplo</option>' : ""}
+          </select></label>
+        <div class="imAcc"><span class="sp"></span><button type="submit" class="btn prim">Crear cartera</button></div>
+      </form></section>
+
+      <section class="tarjeta"><header><h2>Extraer productos</h2>
+        <span class="subt">Mueve o copia productos de la cartera activa a una cartera nueva.</span></header>
+      <form id="formExtraer" novalidate>
+        <label class="campo"><span>Nombre de la cartera nueva</span><input name="nombre" maxlength="60" required placeholder="Mi cartera nueva"></label>
+        <p class="ayuda">Productos de la cartera activa:</p>
+        <div class="listaProds">${productos || '<p class="subt">La cartera activa no tiene productos.</p>'}</div>
+        <label class="opcion"><input type="radio" name="modo" value="copiar" checked>
+          <span><b>Copiar</b><br>Los productos quedan también en la cartera actual.</span></label>
+        <label class="opcion"><input type="radio" name="modo" value="mover">
+          <span><b>Mover</b><br>Los productos salen de la cartera actual.</span></label>
+        <div class="imAcc"><span class="sp"></span><button type="submit" class="btn prim">Extraer</button></div>
+      </form></section>`;
+  }
+
+  async function crearCartera(f) {
+    const c = campos(f);
+    try {
+      const j = await api("POST", "api/carteras", { nombre: c.nombre, desde: c.desde });
+      CAR.lista = j.carteras;
+      E.carteras = j.carteras;
+      E.activa = (j.carteras || []).find(x => x.activa)?.id || E.activa;
+      pintaSelector();
+      pinta();
+    } catch (x) { alert(x.message); }
+  }
+
+  async function duplicarCartera(id) {
+    const c = CAR.lista.find(x => x.id === id);
+    const nombre = prompt("Nombre de la copia:", c ? c.nombre + " (copia)" : "");
+    if (!nombre) return;
+    try {
+      const j = await api("POST", "api/carteras", { nombre, desde: id });
+      CAR.lista = j.carteras;
+      E.carteras = j.carteras;
+      pintaSelector();
+      pinta();
+    } catch (x) { alert(x.message); }
+  }
+
+  async function renombrarCartera(id) {
+    const c = CAR.lista.find(x => x.id === id);
+    const nombre = prompt("Nuevo nombre:", c ? c.nombre : "");
+    if (!nombre) return;
+    try {
+      await api("POST", `api/carteras/${encodeURIComponent(id)}/renombrar`, { nombre });
+      // El nombre vive en el índice y en el titular: recargar repinta barra y título.
+      window.EDITOR_SUCIO = true;
+      location.reload();
+    } catch (x) { alert(x.message); }
+  }
+
+  async function borrarCartera(id) {
+    const c = CAR.lista.find(x => x.id === id);
+    if (!confirm(`¿Borrar la cartera «${c ? c.nombre : id}»? Se guarda una copia antes, por si acaso.`)) return;
+    try {
+      await api("DELETE", `api/carteras/${encodeURIComponent(id)}`);
+      // Puede ser la activa: recargar deja el panel con la cartera que quede.
+      window.EDITOR_SUCIO = true;
+      location.reload();
+    } catch (x) { alert(x.message); }
+  }
+
+  async function activarCartera(id) {
+    try {
+      await api("POST", `api/carteras/${encodeURIComponent(id)}/activar`);
+      location.reload();
+    } catch (x) { alert(x.message); }
+  }
+
+  async function extraerCartera(f) {
+    const c = campos(f);
+    const ids = [...f.querySelectorAll('input[name="prod"]:checked')].map(i => i.value);
+    if (!ids.length) { alert("Elige al menos un producto para extraer."); return; }
+    const mover = c.modo === "mover";
+    const total = (E.cfg.productos || []).length;
+    if (mover && ids.length >= total) {
+      if (!confirm("Esto vaciaría la cartera actual. ¿Seguir?")) return;
+    }
+    try {
+      await api("POST", "api/carteras/extraer", { nombre: c.nombre, productos: ids, mover });
+      // La respuesta trae metadatos, no el documento: con mover=true la cartera
+      // activa ha cambiado, así que se recarga el panel entero.
+      window.EDITOR_SUCIO = true;
+      location.reload();
+    } catch (x) { alert(x.message); }
+  }
+
   /* ---------------------------------------------- copias y web */
   const COP = { lista: null };
 
@@ -849,6 +1005,10 @@
     imConfirmar,
     subirCopia,
     recuperarCopia,
+    carteraActivar: soloPropio(activarCartera),
+    carteraRenombrar: soloPropio(renombrarCartera),
+    carteraDuplicar: soloPropio(duplicarCartera),
+    carteraBorrar: soloPropio(borrarCartera),
     exportarWeb() { location.href = "api/exportar-web?ocultar=" + ($("#webOcultar").checked ? "1" : "0"); },
     verPanelDatos() { recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); },
     async imCopiar() {
@@ -865,6 +1025,10 @@
   document.addEventListener("click", e => {
     const b = e.target.closest("[data-acc]");
     if (b && ACC[b.dataset.acc]) ACC[b.dataset.acc](b.dataset.id);
+  });
+  document.addEventListener("submit", e => {
+    if (e.target.id === "formNuevaCartera") { e.preventDefault(); crearCartera(e.target); }
+    else if (e.target.id === "formExtraer") { e.preventDefault(); extraerCartera(e.target); }
   });
   const btnEmpezar = $("#btnEmpezar");
   if (btnEmpezar) btnEmpezar.onclick = empezar;

@@ -221,7 +221,7 @@ def api_cartera():
                    tiposMovimiento=almacen.TIPOS_MOV,
                    carteraActiva={"id": _cid(), "nombre": carteras.nombre(DATOS, _cid())}
                    if modo() == "propio" else None,
-                   carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
+                   carteras=_catalogo())
 
 
 @app.get("/api/buscar")
@@ -323,16 +323,32 @@ def api_empezar():
 
 # ---------------------------------------------------------------- catálogo de carteras
 
+def _productos_cartera(cid):
+    """Número de productos de una cartera, sin exponer su documento."""
+    if not carteras.id_valido(cid):
+        return 0
+    doc = lee_json(carteras.ruta(DATOS, cid), {})
+    return len(doc.get("productos") or []) if isinstance(doc, dict) else 0
+
+
+def _catalogo():
+    """Catálogo de carteras: metadatos y número de productos, nunca el documento."""
+    activa = _cid()
+    return [{**c, "productos": _productos_cartera(c["id"]), "activa": c["id"] == activa}
+            for c in carteras.lista(DATOS)]
+
+
 def _cartera_meta(cid):
     """Metadatos de una cartera (sin el documento, que puede ser grande)."""
     return {"id": cid, "nombre": carteras.nombre(DATOS, cid),
-            "creada": next((c["creada"] for c in carteras.lista(DATOS) if c["id"] == cid), None)}
+            "creada": next((c["creada"] for c in carteras.lista(DATOS) if c["id"] == cid), None),
+            "productos": _productos_cartera(cid)}
 
 
 @app.get("/api/carteras")
 def api_carteras():
     """Lista de carteras (solo metadatos) y cuál está activa."""
-    return jsonify(carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)],
+    return jsonify(carteras=_catalogo(),
                    activa=_cid() if modo() == "propio" else None)
 
 
@@ -359,8 +375,8 @@ def api_crear_cartera():
             # La primera cartera sale de la demo y queda activa.
             carteras.activa_set(DATOS, info["id"])
             recalcula(descargar="faltan")
-    return jsonify(ok=True, cartera=info,
-                   carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
+    return jsonify(ok=True, cartera={**info, "productos": _productos_cartera(info["id"])},
+                   carteras=_catalogo())
 
 
 @app.post("/api/carteras/extraer")
@@ -390,7 +406,7 @@ def api_extraer_cartera():
             return jsonify(ok=False, errores=e.errores), 400
         recalcula(descargar="faltan")
     return jsonify(ok=True, cartera=nueva, origen=desde, movidos=nueva["productos"],
-                   carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
+                   carteras=_catalogo())
 
 
 @app.post("/api/carteras/<cid>/activar")
@@ -438,7 +454,7 @@ def api_borrar_cartera(cid):
         return jsonify(ok=False, errores=["No se puede borrar la última cartera."]), 400
     with cerrojo:
         carteras.borra(DATOS, cid, ruta_copias())
-    return jsonify(ok=True, carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
+    return jsonify(ok=True, carteras=_catalogo())
 
 
 # ---------------------------------------------------------------- importar

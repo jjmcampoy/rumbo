@@ -358,6 +358,8 @@ table.dt td.nota{max-width:220px;overflow:hidden;text-overflow:ellipsis;text-ali
 .rejilla.tres{grid-template-columns:repeat(3,minmax(0,1fr))}
 .rejilla .ancho{grid-column:1/-1}
 .campo{display:flex;flex-direction:column;gap:7px;min-width:0}
+.campo > span{font-size:12.5px;font-weight:600;color:var(--tinta2)}
+.listaProds{display:grid;gap:8px;margin:10px 0}
 .campo .et{font-size:12.5px;font-weight:600;color:var(--tinta2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .campo .et em{font-style:normal;font-weight:400;color:var(--tinta3);margin-left:4px}
 .mForm input:not([type=checkbox]):not([type=radio]),.mForm select,.mForm textarea{
@@ -610,6 +612,10 @@ body.video .tarjetaCanal{display:none}
 .marca .marcaSep{width:1px;height:15px;background:var(--borde)}
 .marca #marcaTexto{font-weight:500;color:var(--tinta2);font-size:13.5px}
 @media(max-width:720px){.marca .marcaSep,.marca #marcaTexto{display:none}}
+/* Selector de cartera (lo rellena editor.js; en la exportación estática no existe) */
+.selCartera{appearance:none;-webkit-appearance:none;font:inherit;font-size:12.5px;color:var(--tinta2);
+  background:var(--sup2) var(--flecha) no-repeat right 9px center;border:1px solid var(--borde);border-radius:8px;
+  height:26px;padding:0 26px 0 9px;margin-left:8px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -617,7 +623,8 @@ body.video .tarjetaCanal{display:none}
 <div class="top">
   <div class="env">
     <div class="topFila">
-      <div class="marca"><img class="logoIcono" src="icono-64.png" alt="" width="24" height="24"><span class="nombreApp">Rumbo</span><span class="marcaSep"></span><span id="marcaTexto">Mi patrimonio</span></div>
+      <div class="marca"><img class="logoIcono" src="icono-64.png" alt="" width="24" height="24"><span class="nombreApp">Rumbo</span><span class="marcaSep"></span><span id="marcaTexto">Mi patrimonio</span>
+        <select id="selCartera" class="selCartera" hidden aria-label="Cartera"></select></div>
       <div class="sep"></div>
       <span class="meta" id="metaFecha"></span>
       <button class="btn" id="btnPrecios" title="Descarga los precios de hoy de cada producto">↻ Actualizar precios</button>
