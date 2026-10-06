@@ -2,9 +2,12 @@
 """Pruebas de la cartera multi-cartera (T-31): migración, cartera activa y escrituras."""
 import copy
 import datetime as dt
+import hashlib
+import importlib
 import io
 import json
 import os
+import stat
 
 from app import motor
 from tests.conftest import (CARTERA_MINIMA, cartera_en_disco, cartera_en_disco_v2,
@@ -439,3 +442,159 @@ def test_crear_en_demo_sale_de_la_demo(cliente, entorno):
     # api_empezar sigue funcionando como alias fino.
     r = cliente.post("/api/empezar", headers=CAB)
     assert r.status_code == 400  # ya hay cartera propia
+
+
+# ---------------------------------------------------------------- T-36: migración y aislamiento
+
+def _sello(datos_dir):
+    """sha1 de cada fichero bajo una carpeta -> {ruta relativa: hash}."""
+    salida = {}
+    for raiz, _dirs, nombres in os.walk(str(datos_dir)):
+        for n in nombres:
+            p = os.path.join(raiz, n)
+            with open(p, "rb") as f:
+                salida[os.path.relpath(p, str(datos_dir))] = hashlib.sha1(f.read()).hexdigest()
+    return salida
+
+
+def _cartera_rico():
+    """Un documento de la 1.1.1 con todo lo que puede llevar una cartera real."""
+    cfg = copy.deepcopy(CARTERA_MINIMA)
+    cfg["productos"].append({"id": "bono", "nombre": "Bono Prueba", "corto": "Bono",
+                             "tipo": "bono", "fuente": "manual", "codigo": "",
+                             "moneda": "EUR", "slot": 2, "largoPlazo": True})
+    cfg["movimientos"].append({"id": "m2", "fecha": "2024-02-01", "producto": "bono",
+                               "tipo": "compra", "unidades": 5, "importe": 500.0})
+    cfg["valoraciones"] = [{"id": "v1", "fecha": "2024-03-01", "producto": "accion",
+                            "valor": 1100.0}]
+    cfg["comparador"] = [{"id": "real", "nombre": "Mi cartera real", "real": True},
+                         {"id": "pesos", "nombre": "Mis pesos",
+                          "pesos": {"accion": 60, "bono": 40}}]
+    cfg["hitos"] = [10000, 25000]
+    cfg["objetivo"] = {"activo": True, "importe": 50000, "etiqueta": "Meta"}
+    return cfg
+
+
+def _recarga(servidor):
+    """Recarga el módulo (la migración corre al importar) y devuelve un cliente nuevo."""
+    servidor = importlib.reload(servidor)
+    servidor.app.config.update(TESTING=True)
+    return servidor, servidor.app.test_client()
+
+
+def test_permisos_de_la_carpeta_carteras(cliente, entorno):
+    """F-11 en el layout nuevo: carteras/ es 0700 y los ficheros de dentro, 0600."""
+    servidor, tmp_path = entorno
+    r = cliente.post("/api/carteras", json={"nombre": "Mi cartera", "desde": "vacia"},
+                     headers=CAB)
+    assert r.status_code == 200
+
+    carpeta = os.path.join(tmp_path, "carteras")
+    modo = stat.S_IMODE(os.stat(carpeta).st_mode)
+    assert modo == 0o700, oct(modo)
+
+    dentro = [os.path.join(carpeta, n) for n in os.listdir(carpeta)]
+    assert dentro, "no se ha escrito nada en carteras/"
+    for p in dentro:
+        modo = stat.S_IMODE(os.stat(p).st_mode)
+        assert modo == 0o600, f"{p}: {oct(modo)}"
+
+
+def test_migracion_legada_conserva_todo(cliente, entorno):
+    """Un mis_datos rico de la 1.1.1 se migra sin perder nada y sin borrar lo demás."""
+    servidor, tmp_path = entorno
+    cfg = _cartera_rico()
+    escribe_json(os.path.join(tmp_path, "cartera.json"), cfg)
+    escribe_json(os.path.join(tmp_path, "copias", "auto_x.json"), CARTERA_MINIMA)
+    escribe_cache(tmp_path, "AAA", {"2024-01-02": 100.0, "2024-01-03": 101.0})
+    escribe_json(os.path.join(tmp_path, "estado.json"),
+                 {"preciosActualizados": "2024-01-01T00:00:00"})
+    escribe_json(os.path.join(tmp_path, "calculado_propio.json"), {"patrimonio": 1234.0})
+
+    servidor, cliente = _recarga(servidor)
+
+    r = cliente.get("/api/cartera")
+    assert r.status_code == 200
+    cuerpo = r.get_json()
+    assert cuerpo["modo"] == "propio"
+    assert cuerpo["cartera"] == cfg, "la cartera migrada no es idéntica a la antigua"
+
+    # Nada de lo demás se toca: la caché compartida y los derivados siguen donde estaban.
+    assert os.path.exists(os.path.join(tmp_path, "cache", "AAA.json"))
+    assert os.path.exists(os.path.join(tmp_path, "copias", "auto_x.json"))
+    assert os.path.exists(os.path.join(tmp_path, "estado.json"))
+    assert os.path.exists(os.path.join(tmp_path, "calculado_propio.json"))
+
+    # La cartera antigua se movió a copias/ con una copia de seguridad intacta.
+    assert not os.path.exists(os.path.join(tmp_path, "cartera.json"))
+    respaldos = [n for n in os.listdir(os.path.join(tmp_path, "copias"))
+                 if n.startswith("cartera_migrada_")]
+    assert len(respaldos) == 1
+    with open(os.path.join(tmp_path, "copias", respaldos[0]), encoding="utf-8") as f:
+        assert json.load(f) == cfg
+
+
+def test_aislamiento_entre_carteras(cliente, entorno):
+    """Escribir en una cartera, y borrarla, no toca el fichero de la otra."""
+    servidor, tmp_path = entorno
+    _dos_carteras(tmp_path)
+    rb = os.path.join(tmp_path, "carteras", "b.json")
+    with open(rb, "rb") as f:
+        b_antes = f.read()
+
+    r = cliente.post("/api/productos", json={"nombre": "Nuevo", "tipo": "accion",
+                                            "fuente": "manual"}, headers=CAB)
+    assert r.status_code == 200
+    with open(rb, "rb") as f:
+        assert f.read() == b_antes, "escribir en A ha modificado B"
+
+    r = cliente.delete("/api/carteras/a", headers=CAB)
+    assert r.status_code == 200
+    with open(rb, "rb") as f:
+        assert f.read() == b_antes, "borrar A ha modificado B"
+    assert os.path.exists(rb)
+
+
+def test_dos_escrituras_no_tocan_el_mismo_fichero(cliente, entorno):
+    """Dos POST /api/productos seguidos, en carteras distintas, van a ficheros distintos."""
+    servidor, tmp_path = entorno
+    _dos_carteras(tmp_path)
+    ra = os.path.join(tmp_path, "carteras", "a.json")
+    rb = os.path.join(tmp_path, "carteras", "b.json")
+
+    r = cliente.post("/api/productos", json={"nombre": "En A", "tipo": "accion",
+                                            "fuente": "manual"}, headers=CAB)
+    assert r.status_code == 200
+    a1, b1 = os.stat(ra).st_mtime_ns, os.stat(rb).st_mtime_ns
+
+    r = cliente.post("/api/carteras/b/activar", headers=CAB)
+    assert r.status_code == 200
+    r = cliente.post("/api/productos", json={"nombre": "En B", "tipo": "accion",
+                                            "fuente": "manual"}, headers=CAB)
+    assert r.status_code == 200
+    a2, b2 = os.stat(ra).st_mtime_ns, os.stat(rb).st_mtime_ns
+
+    assert a2 == a1, "la escritura en B ha tocado la cartera A"
+    assert b2 > b1, "la escritura en B no ha llegado a su fichero"
+
+
+def test_migracion_idempotente(cliente, entorno):
+    """Recargar el servidor tres veces más no vuelve a escribir en carteras/."""
+    servidor, tmp_path = entorno
+    cartera_en_disco(tmp_path)
+    servidor, cliente = _recarga(servidor)          # primera migración
+    assert os.path.exists(os.path.join(tmp_path, "carteras", "indice.json"))
+
+    antes = _sello(os.path.join(tmp_path, "carteras"))
+    for _ in range(3):
+        servidor, cliente = _recarga(servidor)
+    assert _sello(os.path.join(tmp_path, "carteras")) == antes
+    assert cliente.get("/api/cartera").get_json()["cartera"]["titular"] == "Prueba"
+
+
+def test_instalacion_limpia_no_crea_nada(cliente, entorno):
+    """En una carpeta vacía la app está en demo y no ha creado ni un fichero."""
+    servidor, tmp_path = entorno
+    r = cliente.get("/api/cartera")
+    assert r.get_json()["modo"] == "demo"
+    assert os.listdir(tmp_path) == [], os.listdir(tmp_path)

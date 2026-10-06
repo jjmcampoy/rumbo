@@ -78,7 +78,8 @@ def lee_indice(datos):
 def escribe_indice(datos, indice):
     """Escritura atómica (temporal + os.replace) del índice."""
     ruta = ruta_indice(datos)
-    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    # mode explícito: carteras/ se crea al importar, antes del umask de main().
+    os.makedirs(os.path.dirname(ruta), mode=0o700, exist_ok=True)
     tmp = ruta + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(indice, f, ensure_ascii=False, indent=1)
@@ -97,7 +98,8 @@ def _lee_json(ruta, defecto=None):
 
 def _escribe_json(ruta, datos):
     """Escribe en un archivo temporal y lo renombra: si se corta, no se pierde nada."""
-    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    # mode explícito: carteras/ se crea al importar, antes del umask de main().
+    os.makedirs(os.path.dirname(ruta), mode=0o700, exist_ok=True)
     tmp = ruta + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(datos, f, ensure_ascii=False, indent=1)
