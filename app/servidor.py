@@ -353,6 +353,73 @@ def api_carteras():
                    activa=_cid() if modo() == "propio" else None)
 
 
+@app.get("/api/carteras/resumen")
+def api_carteras_resumen():
+    """Cifras de cada cartera (de su cálculo guardado) y un total conjunto."""
+    if modo() == "demo":
+        return jsonify(ok=False, errores=[AVISO_DEMO]), 403
+    filas, flujos, fechas = [], [], []
+    for c in carteras.lista(DATOS):
+        cid = c["id"]
+        fila = {"id": cid, "nombre": c["nombre"], "activa": cid == _cid()}
+        calc = lee_json(ruta_calculado(cid))
+        if calc is None:
+            try:
+                with cerrojo:
+                    calc = motor.construir(almacen.carga(carteras.ruta(DATOS, cid)), DATOS,
+                                           descargar=False, historico=ruta_historico(cid))
+                if calc is not None:
+                    escribe_json(ruta_calculado(cid), calc)
+            except Exception as e:
+                calc = None
+                fila["error"] = str(e)
+        if calc is None:
+            # El motor devuelve None cuando no consigue valorar la cartera (por ejemplo,
+            # sin precios): también es un fallo de cálculo y la entrada debe decirlo.
+            fila.setdefault("error", "No se pudo calcular esta cartera.")
+            filas.append(fila)
+            continue
+        t = calc.get("total") or {}
+        fila.update({
+            "patrimonio": t.get("patrimonio"),
+            "aportado": t.get("aportado"),
+            "plusvalia": t.get("plusvalia"),
+            "rentabilidad": t.get("rentabilidad"),
+            "tir": t.get("tir"),
+            "fechaExtracto": calc.get("fechaExtracto"),
+            "generado": calc.get("generado"),
+            "nProductos": len(calc.get("productos") or []),
+        })
+        # En el JSON los flujos llevan la fecha como texto ISO, pero motor.xirr
+        # calcula con ((fecha - f0).days) y necesita objetos date: sin convertirlos
+        # devolvería None siempre. Se descarta la pareja que no se pueda leer.
+        for p in (calc.get("productos") or []):
+            for par in (p.get("flujos") or []):
+                try:
+                    flujos.append((dt.date.fromisoformat(str(par[0])), float(par[1])))
+                except (TypeError, ValueError, IndexError):
+                    continue
+        if calc.get("fechaExtracto"):
+            try:
+                fechas.append(dt.date.fromisoformat(str(calc["fechaExtracto"])))
+            except ValueError:
+                pass
+        filas.append(fila)
+    total = {"patrimonio": 0.0, "aportado": 0.0, "plusvalia": 0.0,
+             "rentabilidad": None, "tir": None}
+    for f in filas:
+        if "error" in f:
+            continue
+        total["patrimonio"] = round(total["patrimonio"] + (f.get("patrimonio") or 0), 2)
+        total["aportado"] = round(total["aportado"] + (f.get("aportado") or 0), 2)
+        total["plusvalia"] = round(total["plusvalia"] + (f.get("plusvalia") or 0), 2)
+    if total["aportado"]:
+        total["rentabilidad"] = round(total["plusvalia"] / total["aportado"], 4)
+    if flujos and fechas:
+        total["tir"] = motor.xirr(flujos + [(max(fechas), total["patrimonio"])])
+    return jsonify(carteras=filas, total=total)
+
+
 @app.post("/api/carteras")
 def api_crear_cartera():
     """Crea una cartera: vacía, copia del ejemplo o copia de otra cartera.
