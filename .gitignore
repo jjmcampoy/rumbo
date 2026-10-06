@@ -7,3 +7,8 @@ mis_datos/
 __pycache__/
 *.pyc
 *.tmp
+
+# Pruebas y cobertura
+.pytest_cache/
+htmlcov/
+.coverage

@@ -37,7 +37,7 @@
 
   async function api(metodo, url, cuerpo) {
     const r = await fetch(url, {
-      method: metodo, headers: { "Content-Type": "application/json" },
+      method: metodo, headers: { "Content-Type": "application/json", "X-Rumbo": "1" },
       body: cuerpo ? JSON.stringify(cuerpo) : undefined,
     });
     let j = {};
@@ -637,7 +637,7 @@
     b.disabled = true;
     b.textContent = "Revisando y buscando precios…";
     try {
-      const r = await fetch("api/importar/previsualizar", { method: "POST", body: fd });
+      const r = await fetch("api/importar/previsualizar", { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) throw new Error((j.errores || ["Algo ha fallado al leerlo."]).join("\n"));
       IMP.informe = j.informe;
@@ -664,6 +664,28 @@
         <span class="meta"><span>${esc(E.tipos[p.tipo] || p.tipo)}</span><span>${esc(p.codigo || "valor a mano")}</span>
         <span>${esc(E.fuentes[p.fuente])}</span>${p.precio ? `<span>${num(p.precio)} ${esc(p.monedaPrecio)} · ${fecha(p.fechaPrecio)}</span>` : ""}</span></div>`).join("")}</div>` : "";
     const ESTADO = { nuevo: "Nuevo", repetido: "Ya estaba", error: "Con error" };
+    // Reconciliación por fondo (MyInvestor): el valor que dice el extracto frente al
+    // que calcula la app, para que cualquier descuadre se vea antes de confirmar.
+    const recon = (inf.reconciliacion || []).map(r => {
+      const d = Math.abs(Number(r.desvio) || 0);
+      const clase = d <= 0.01 ? "pos" : d <= 0.05 ? "aviso" : "neg";
+      const color = d <= 0.01 ? "var(--bien)" : d <= 0.05 ? "var(--aviso)" : "var(--mal)";
+      const avisos = [];
+      if (r.sospechosos > 0) avisos.push(`${r.sospechosos} compras de otro fondo (traspaso)`);
+      if (d > 0.05) avisos.push("Revisa este fondo antes de confirmar");
+      // Plusvalías ya realizadas del extracto: se muestran como aviso, nunca como
+      // movimientos, porque MyInvestor no da la fecha de venta.
+      const pr = r.plusvaliasRealizadas;
+      if (pr && pr.n > 0) avisos.push(`${pr.n} plusvalías ya realizadas del extracto: ${num(pr.importe, 2)} € — no se importan (MyInvestor no da la fecha de venta)`);
+      const aviso = avisos.join(" · ");
+      return `<tr class="est-recon-${clase}"><td style="text-align:left">${esc(r.nombre)}</td>
+        <td>${eur(r.invertido)}</td><td>${eur(r.valorExtracto)}</td><td>${eur(r.valorCalculado)}</td>
+        <td style="color:${color}">${num(Number(r.desvio) * 100, 1)} %</td><td style="text-align:left">${esc(aviso)}</td></tr>`;
+    }).join("");
+    const tablaRecon = recon ? `<div class="tablaEnv" style="margin-top:16px"><table class="dt"><thead><tr>
+      <th style="text-align:left">Fondo</th><th>Invertido</th><th>Valor en el extracto</th>
+      <th>Valor calculado por la app</th><th>Desvío</th><th style="text-align:left">Aviso</th></tr></thead>
+      <tbody>${recon}</tbody></table></div>` : "";
     const filas = inf.filas.map(f => `<tr class="est-${f.estado}"><td>${fecha(f.fecha)}</td>
       <td style="text-align:left">${esc(f.productoNombre)}</td><td style="text-align:left">${esc(E.tiposMov[f.tipo] || "Saldo")}</td>
       <td>${f.unidades ? num(f.unidades) : "—"}</td><td>${eur(f.importe)}</td>
@@ -681,7 +703,7 @@
       </div>
       <div class="comprueba"><b>Compara estas cifras con tu banco antes de confirmar.</b>
         ${IMP.origen === "ia" ? "Una IA puede equivocarse al copiar números o saltarse alguna fila: revisa sobre todo el total invertido." : ""}</div>
-      ${avisos}${errores}${nuevos}
+      ${avisos}${errores}${nuevos}${tablaRecon}
       ${filas ? `<div class="tablaEnv alto" style="margin-top:16px"><table class="dt"><thead><tr><th>Fecha</th>
         <th style="text-align:left">Producto</th><th style="text-align:left">Tipo</th><th>Unidades</th><th>Importe</th>
         <th style="text-align:left"></th><th>Estado</th></tr></thead><tbody>${filas}</tbody></table></div>` : ""}
@@ -768,7 +790,7 @@
     if (E.modo === "propio" && !confirm("Esto sustituye tu cartera actual por la de la copia. Tu cartera actual se guarda antes en «Copias automáticas». ¿Seguir?")) return;
     const fd = new FormData();
     fd.append("archivo", inp.files[0]);
-    const r = await fetch("api/copia/subir", { method: "POST", body: fd });
+    const r = await fetch("api/copia/subir", { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) { fallo.textContent = (j.errores || ["No he podido leer la copia."]).join("\n"); fallo.hidden = false; return; }
     recuerda.guarda("patrimonio.tab", "datos");

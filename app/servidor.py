@@ -15,6 +15,7 @@ import re
 import secrets
 import sys
 import threading
+import urllib.parse
 import urllib.request
 import webbrowser
 
@@ -35,6 +36,61 @@ app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False   # respeta el orden de tipos y listas al mandarlos al navegador
 cerrojo = threading.RLock()  # el motor no admite dos cálculos (ni dos escrituras) a la vez
 
+# Cabeceras de seguridad para todas las respuestas (ver 01-security-analysis.md).
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; "
+       "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+
+@app.after_request
+def cabeceras_seguridad(resp):
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    resp.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    return resp
+
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024      # 25 MB por petición
+MAX_ARCHIVOS = 50
+MAX_FILAS = 50000
+
+
+@app.errorhandler(413)
+def demasiado_grande(_e):
+    return jsonify(ok=False, errores=["El archivo es demasiado grande (máximo 25 MB)."]), 413
+
+# Hosts y orígenes permitidos. En Docker hay que añadir el nombre del NAS:
+#   RUMBO_HOSTS=rumbo.lan,127.0.0.1,localhost
+HOSTS = tuple(h.strip().lower() for h in
+              (os.environ.get("RUMBO_HOSTS") or "127.0.0.1,localhost").split(",") if h.strip())
+CABECERA_ANTICSRF = "X-Rumbo"
+MUTANTES = ("POST", "PUT", "PATCH", "DELETE")
+
+def _host_de(valor):
+    """'rumbo.lan:8765' -> 'rumbo.lan'; '[::1]:8765' -> '::1'."""
+    v = (valor or "").strip().lower()
+    if v.startswith("["):
+        return v[1:].split("]")[0]
+    return v.split(":")[0]
+
+@app.before_request
+def guardia_peticion():
+    # 1) Host permitido: evita DNS rebinding.
+    if _host_de(request.host) not in HOSTS:
+        return jsonify(ok=False, errores=["Host no permitido."]), 421
+    # 2) Peticiones de navegador de otro sitio: fuera (CSRF).
+    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        return jsonify(ok=False, errores=["Origen no permitido."]), 403
+    origen = request.headers.get("Origin")
+    if origen and _host_de(urllib.parse.urlsplit(origen).netloc) not in HOSTS:
+        return jsonify(ok=False, errores=["Origen no permitido."]), 403
+    # 3) Las rutas que escriben exigen una cabecera que un formulario cross-site
+    #    no puede poner (multipart/form-data sigue siendo "simple" para CORS).
+    if request.method in MUTANTES and request.path.startswith("/api/"):
+        if request.headers.get(CABECERA_ANTICSRF) != "1":
+            return jsonify(ok=False, errores=["Falta la cabecera %s." % CABECERA_ANTICSRF]), 403
+    return None
+
 
 # ---------------------------------------------------------------- archivos
 
@@ -52,7 +108,9 @@ def escribe_json(ruta, datos):
     tmp = ruta + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(datos, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o600)
     os.replace(tmp, ruta)
+    os.chmod(ruta, 0o600)
 
 
 def modo():
@@ -135,6 +193,23 @@ def api_buscar():
     n = len(buscar.FALLOS)
     res = buscar.buscar(request.args.get("q", ""))
     return jsonify(resultados=res, sinConexion=(not res and bool(buscar.hubo_fallos_desde(n))))
+
+
+@app.get("/api/vivo")
+def api_vivo():
+    """Precio actual de la cripto del producto en vivo; lo pide el panel a nuestro
+    propio servidor (antes el navegador llamaba a CoinGecko y Binance)."""
+    calc = lee_json(ruta_calculado()) or {}
+    vivo = calc.get("vivo") or {}
+    coin = vivo.get("coin")
+    if not coin:
+        return jsonify(ok=False, errores=["No hay ningún producto en vivo."]), 404
+    with cerrojo:
+        p = buscar.probar("coingecko", coin)
+    if not p or not p.get("precio"):
+        return jsonify(ok=False, errores=["Sin precio en vivo ahora mismo."]), 502
+    return jsonify(ok=True, coin=coin, precio=p["precio"], fecha=p.get("fecha"),
+                   moneda=p.get("moneda") or "EUR")
 
 
 GUARDAR = {"productos": almacen.guarda_producto, "movimientos": almacen.guarda_movimiento,
@@ -222,6 +297,8 @@ def api_importar_previsualizar():
         return jsonify(ok=False, errores=[AVISO_DEMO]), 403
     origen = request.form.get("origen")
     archivos = [(f.filename, f.read()) for f in request.files.getlist("archivos") if f.filename]
+    if len(archivos) > MAX_ARCHIVOS:
+        return jsonify(ok=False, errores=[f"Demasiados archivos (máximo {MAX_ARCHIVOS})."]), 400
     texto = (request.form.get("texto") or "").strip()
     with cerrojo:
         cfg = almacen.carga(os.path.join(DATOS, "cartera.json"))
@@ -290,9 +367,9 @@ def ruta_copias():
 
 def valida_copia(cfg):
     """Comprueba que un JSON tiene pinta de cartera de esta app."""
-    if not isinstance(cfg, dict) or not all(isinstance(cfg.get(k), list)
-                                            for k in ("productos", "movimientos", "valoraciones")):
-        raise almacen.ErrorValidacion(["Ese archivo no es una copia de seguridad de esta app."])
+    errores = almacen.valida_cartera(cfg)
+    if errores:
+        raise almacen.ErrorValidacion(errores)
     return cfg
 
 
@@ -459,6 +536,8 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    # Los archivos nuevos (caché, histórico) heredan permisos restrictivos.
+    os.umask(0o077)
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Si la app ya está abierta (otra ventana), basta con enseñarla.

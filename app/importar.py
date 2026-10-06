@@ -77,18 +77,24 @@ def decodifica(crudo):
 
 CAB_MYINVESTOR = {"fecha": ["fecha fiscal", "fecha"],
                   "coste": ["inversion", "inversión", "coste"],
-                  "valor": ["valor de mercado", "valor mercado", "valor"]}
+                  "valor": ["valor de mercado", "valor mercado", "valor"],
+                  "resultado": ["resultado fiscal", "resultado", "plusvalía", "plusvalia",
+                                "ganancia", "pérdida", "perdida"]}
 
 
 def leer_csv_myinvestor(texto):
     """
     Lee el CSV "Plusvalías y minusvalías" de un fondo de MyInvestor.
-    Devuelve (lotes, reembolsos): lotes = [[fecha, coste, valor]] de lo que sigues
-    teniendo; reembolsos = [[fecha, resultado]] de lo ya vendido, del que el extracto
-    solo da la plusvalía.
+    Devuelve (lotes, reembolsos, sin_fecha): lotes = [[fecha, coste, valor]] de lo
+    que sigues teniendo; reembolsos = [[fecha, resultado]] de lo ya vendido, del
+    que el extracto solo da la plusvalía; sin_fecha = [(número de fila, texto)]
+    de las filas cuya fecha no se entiende, para que el plan las reporte.
     """
     texto = decodifica(texto)
-    delim = ";" if texto.count(";") >= texto.count(",") else ","
+    # El separador se decide solo con la cabecera: el cuerpo puede contener
+    # comas dentro de los números (1.234,56) y engañaría al recuento.
+    primera = texto.splitlines()[0] if texto.splitlines() else ""
+    delim = ";" if primera.count(";") >= primera.count(",") else ","
     filas = [f for f in csv.reader(io.StringIO(texto), delimiter=delim)
              if any((c or "").strip() for c in f)]
     if not filas:
@@ -102,54 +108,133 @@ def leer_csv_myinvestor(texto):
                 return i
         return defecto
 
-    ic, ico, iv = col("fecha", 0), col("coste", 1), col("valor", 2)
-    lotes, reembolsos = [], []
-    for fila in filas[1:]:
-        if len(fila) <= max(ic, ico, iv):
+    ic, ico, iv, ir = col("fecha", 0), col("coste", 1), col("valor", 2), col("resultado", 3)
+    lotes, reembolsos, sin_fecha = [], [], []
+    for n, fila in enumerate(filas[1:], start=2):
+        if len(fila) <= max(ic, ico, iv, ir):
             continue
-        m = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", fila[ic])
-        if not m:
+        # Primero ISO (aaaa-mm-dd), luego día primero (dd/mm/aaaa): los extractos
+        # son españoles. Se reutiliza la validación de lee_fecha (rangos de
+        # mes/día, año de 2 dígitos -> 20xx).
+        fecha = lee_fecha(fila[ic]) or _lee_fecha_ddmmyyyy(fila[ic])
+        if not fecha:
+            sin_fecha.append((n, fila[ic]))
             continue
-        fecha = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
         coste, valor = num_es(fila[ico]), num_es(fila[iv])
         if coste <= 0 and valor <= 0:
             # Participaciones ya reembolsadas: solo queda el resultado fiscal.
-            if len(fila) > 3 and num_es(fila[3]):
-                reembolsos.append([fecha, round(num_es(fila[3]), 2)])
+            if len(fila) > ir and num_es(fila[ir]):
+                reembolsos.append([fecha, round(num_es(fila[ir]), 2)])
             continue
         lotes.append([fecha, round(coste, 2), round(valor, 2)])
     lotes.sort(key=lambda x: x[0])
-    return lotes, reembolsos
+    return lotes, reembolsos, sin_fecha
 
 
 def myinvestor_a_movimientos(producto_id, lotes, reembolsos, serie_vl):
     """
     Convierte los lotes en compras. El extracto no trae participaciones, así que
-    se calculan como coste / valor liquidativo del día de compra. No se usa el
-    valor de mercado del extracto porque MyInvestor lo calcula con un VL de uno o
-    dos días antes y saldrían participaciones erróneas.
+    se calculan de dos formas y se elige la coherente:
+
+    * coste / VL de la fecha fiscal: la más precisa para un lote comprado en ESTE
+      fondo, porque el extracto da el coste exacto y el VL de ese día.
+    * valor de mercado / VL actual: la única ancla fiable cuando el lote viene de
+      otro fondo (traspaso), porque el VL de la fecha fiscal corresponde entonces
+      al fondo de origen y la fórmula por fecha sale disparada.
+
+    Si las dos formas coinciden (±2 %), se usa la por fecha; si no, manda el valor
+    de mercado del extracto y el lote se marca como sospechoso. Al final se
+    recalibra una sola vez para que Σ unidades × VL actual cuadre con el valor
+    total del extracto (solo si el factor k está entre 0,5 y 2).
+
+    Devuelve (movimientos, avisos, reconciliacion).
     """
-    # VL con el que MyInvestor valoró el extracto, para los lotes sin VL de compra.
-    estimados = sorted(serie_vl[f] * v / c for f, c, v in lotes if serie_vl.get(f) and c > 0)
-    vl_extracto = estimados[len(estimados) // 2] if estimados else None
-    movs, sin_vl = [], 0
+    # Filas ambiguas: inversión positiva pero sin valor de mercado. Un lote que
+    # se sigue teniendo siempre vale algo, así que no es una compra: se trata
+    # como reembolso (su resultado fiscal suma a las plusvalías realizadas).
+    compras, reembolsos = [], list(reembolsos)
+    n_ambiguas = 0
     for fecha, coste, valor in lotes:
-        vc = serie_vl.get(fecha)
-        if vc:
-            unidades = coste / vc
-        elif vl_extracto:
-            unidades, sin_vl = valor / vl_extracto, sin_vl + 1
+        if coste > 0 and valor <= 0:
+            n_ambiguas += 1
+            reembolsos.append([fecha, 0.0])
         else:
-            unidades, sin_vl = 0.0, sin_vl + 1
+            compras.append([fecha, coste, valor])
+    avisos = []
+    if n_ambiguas:
+        avisos.append(f"{n_ambiguas} filas con inversión pero sin valor de mercado: "
+                      "se han tratado como lotes vendidos, no como compras.")
+
+    # VL actual del fondo: el último disponible (o el máximo, si no hay fecha de hoy).
+    vl_actual = valor_en(serie_vl, motor.hoy(), margen=30) if serie_vl else None
+    if not vl_actual and serie_vl:
+        vl_actual = max(serie_vl.values())
+    if not vl_actual:
+        avisos.append(f"No encuentro el valor liquidativo actual de {producto_id}.")
+
+    movs, sospechosos = [], 0
+    for fecha, coste, valor in compras:
+        # Tolerante: un lote fechado en sábado toma el VL del viernes anterior.
+        vc = valor_en(serie_vl, fecha, margen=7) if serie_vl else None
+        u_fecha = coste / vc if (vc and coste > 0) else None
+        u_valor = valor / vl_actual if (vl_actual and valor > 0) else None
+        sospechoso = False
+        if u_fecha is not None and u_valor is not None and abs(u_fecha - u_valor) <= 0.02 * u_valor:
+            unidades = u_fecha          # lote normal de este fondo: manda la fórmula por fecha
+        elif u_valor is not None:
+            unidades, sospechoso = u_valor, True   # traspaso o fecha sin VL
+        elif u_fecha is not None:
+            unidades, sospechoso = u_fecha, True   # sin valor de mercado utilizable
+        else:
+            unidades, sospechoso = 0.0, True       # no hay nada con lo que calcularlo
+        if sospechoso:
+            sospechosos += 1
         movs.append({"fecha": fecha, "producto": producto_id, "tipo": "compra",
-                     "unidades": round(unidades, 6), "importe": coste, "nota": "MyInvestor"})
-    for fecha, resultado in reembolsos:
-        # Del reembolso solo se conoce la plusvalía: se anota como una venta de 0
-        # participaciones que cobra ese resultado.
-        movs.append({"fecha": fecha, "producto": producto_id, "tipo": "venta",
-                     "unidades": 0, "importe": resultado,
-                     "nota": "Plusvalía de un reembolso (MyInvestor no da la fecha de venta)"})
-    return movs, sin_vl
+                     "unidades": round(unidades, 6), "importe": coste,
+                     "nota": "MyInvestor (posible traspaso)" if sospechoso else "MyInvestor"})
+    # Los reembolsos NO se convierten en movimientos: del reembolso solo se
+    # conoce la plusvalía, no el importe cobrado ni la fecha de venta (el
+    # extracto solo da la fecha fiscal del lote comprado), así que anotarlos
+    # como ventas inventaba un cobro con fecha de años atrás. Se reportan en la
+    # reconciliación y en los avisos.
+    reembolsos_info = {"n": len(reembolsos), "importe": round(sum(r for _, r in reembolsos), 2),
+                       "desde": min((f for f, _ in reembolsos), default=None),
+                       "hasta": max((f for f, _ in reembolsos), default=None)}
+    if reembolsos_info["n"]:
+        avisos.append(f"El extracto reporta {reembolsos_info['n']} plusvalías ya realizadas por "
+                      f"{reembolsos_info['importe']:.2f} € de lotes que ya no tienes. "
+                      "MyInvestor no da la fecha de venta, así que no se importan como movimientos: no aparecerán en "
+                      "«plusvalía ya materializada».")
+
+    # Recalibrado (una sola vez, para todo el fondo): que el valor calculado cuadre
+    # con el valor total del extracto, que es el número que el usuario comprueba.
+    invertido = round(sum(c[1] for c in compras), 2)
+    valor_total = round(sum(c[2] for c in compras), 2)
+    calculado = round(sum(m["unidades"] for m in movs if m["tipo"] == "compra") * vl_actual, 2) \
+        if vl_actual else 0.0
+    k = 1.0
+    if valor_total > 0 and calculado > 0:
+        k = valor_total / calculado
+        if abs(k - 1) > 0.02 and 0.5 <= k <= 2:
+            for m in movs:
+                if m["tipo"] == "compra":
+                    m["unidades"] = round(m["unidades"] * k, 6)
+            calculado = round(sum(m["unidades"] for m in movs if m["tipo"] == "compra") * vl_actual, 2)
+        avisos.append(f"Reconciliación: el extracto dice {valor_total:.2f} € y la app calcula "
+                      f"{calculado:.2f} €.")
+    elif valor_total <= 0:
+        avisos.append("El extracto no trae «Valor de mercado»: se usan las participaciones "
+                      "por VL de la fecha fiscal.")
+    if sospechosos:
+        avisos.append(f"{sospechosos} compras con fecha fiscal de otro fondo (probable traspaso): "
+                      "sus participaciones se han calculado con el valor de mercado del extracto.")
+
+    reconciliacion = {"invertido": invertido, "valorExtracto": valor_total,
+                      "valorCalculado": calculado, "desvio": round(k - 1, 4),
+                      "sospechosos": sospechosos, "lotes": len(lotes),
+                      "vlActual": round(vl_actual, 4) if vl_actual else None,
+                      "plusvaliasRealizadas": reembolsos_info}
+    return movs, avisos, reconciliacion
 
 
 # ---------------------------------------------------------------- lectura de tablas
@@ -174,6 +259,8 @@ def leer_tabla(nombre, contenido):
     # Se guarda el número de fila real (el que ves en Excel) aunque haya filas en blanco.
     filas = [(n, f) for n, f in enumerate(filas, start=1)
              if f and any(c not in (None, "") and str(c).strip() for c in f)]
+    if len(filas) > 50000:   # límite de filas por tabla (F-10)
+        return [], "La tabla es demasiado grande (máximo 50.000 filas)."
     if not filas:
         return [], "No hay ninguna fila con datos."
 
@@ -221,6 +308,19 @@ def lee_fecha(v):
         return None
 
 
+def _lee_fecha_ddmmyyyy(t):
+    """Fecha día primero (dd/mm/aaaa o dd-mm-aaaa), con la validación de lee_fecha."""
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})", str(t or "").strip())
+    if not m:
+        return None
+    a = int(m.group(3)) + (2000 if len(m.group(3)) == 2 else 0)
+    me, di = int(m.group(2)), int(m.group(1))
+    try:
+        return dt.date(a, me, di).isoformat()
+    except ValueError:   # un 31 de febrero, un mes 13...
+        return None
+
+
 def lee_numero(v):
     if v is None or (isinstance(v, str) and not v.strip()):
         return None
@@ -244,6 +344,7 @@ class Plan:
         self.reemplazar = []         # [(producto id o ref, origen)]: se borran sus importados previos
         self.errores = []            # [{"fila", "mensaje"}]
         self.avisos = []
+        self.reconciliacion = []     # una entrada por archivo de MyInvestor
 
     def error(self, fila, mensaje):
         self.errores.append({"fila": fila, "mensaje": mensaje})
@@ -369,6 +470,14 @@ def preparar_tabla(cfg, filas, carpeta):
         ref = res.producto(n, ident, nombre, tprod)
         if not ref:
             continue
+        if tipo == "saldo":
+            # Un saldo de un producto con precio automático se perdería en silencio: se rechaza.
+            p = res.datos(ref)
+            if p and p.get("fuente") != "manual" and p.get("tipo") not in almacen.SOLO_SALDO:
+                plan.error(n, f"«{p.get('corto') or p['nombre']}» tiene precio automático: los saldos solo se "
+                              "anotan en productos con «Valor anotado a mano». Cambia su fuente de precio o "
+                              "anota esa operación como compra.")
+                continue
         marcas = []
 
         # Importes en otra moneda: se pasan a euros con el cambio de ese día.
@@ -398,6 +507,14 @@ def preparar_tabla(cfg, filas, carpeta):
             neto = importe - (comision or 0) if tipo == "compra" else importe + (comision or 0)
             unidades = neto / precio
             marcas.append("unidades calculadas")
+        elif tipo in ("compra", "venta") and cotiza and unidades and importe:
+            # Las unidades dadas no cuadran con el precio de ese día: se avisa,
+            # sin rechazar la fila (con comisiones de entrada puede ser legítimo).
+            precio_dia = valor_en(res.serie(ref, fecha), fecha, margen=6)
+            if precio_dia:
+                implicito = importe / unidades
+                if abs(implicito / precio_dia - 1) > 0.20:
+                    marcas.append(f"ojo: {implicito:.2f} €/unidad frente a {precio_dia:.2f} € del {fecha}")
         plan.movimientos.append({"fila": n, "producto": ref, "fecha": fecha, "tipo": tipo,
                                  "unidades": unidades, "importe": round(importe, 2),
                                  "comision": round(comision, 2) if comision else None,
@@ -410,6 +527,18 @@ def preparar_myinvestor(cfg, archivos, carpeta):
     importó antes de ese fondo, porque el extracto siempre trae la foto completa."""
     plan = Plan()
     res = Resolutor(cfg, plan, carpeta)
+    # Un ISIN en más de un archivo no se puede mezclar: se descartan TODOS sus
+    # archivos antes de construir el plan, para que «aplicar» no añada nada.
+    vistos, duplicados = {}, set()
+    for nombre, _ in archivos:
+        m = re.search(r"([A-Z]{2}[A-Z0-9]{9}\d)", (nombre or "").upper())
+        if not m:
+            continue
+        isin = m.group(1)
+        if isin in vistos:
+            duplicados.add(isin)
+        else:
+            vistos[isin] = nombre
     for nombre, contenido in archivos:
         m = re.search(r"([A-Z]{2}[A-Z0-9]{9}\d)", (nombre or "").upper())
         if not m:
@@ -417,7 +546,15 @@ def preparar_myinvestor(cfg, archivos, carpeta):
                                "MyInvestor sin cambiarle el nombre (lleva el ISIN del fondo).")
             continue
         isin = m.group(1)
-        lotes, reembolsos = leer_csv_myinvestor(contenido)
+        if isin in duplicados:
+            if nombre != vistos[isin]:
+                plan.error(nombre, f"El ISIN {isin} viene en más de un archivo "
+                                   f"({vistos[isin]} y {nombre}): sube solo el extracto más reciente de cada fondo.")
+            continue
+        lotes, reembolsos, sin_fecha = leer_csv_myinvestor(contenido)
+        for n, texto_fecha in sin_fecha:
+            plan.error(nombre, f"Fila {n}: la fecha «{texto_fecha}» no se entiende. "
+                               "Usa el formato 2025-03-10 o 10/03/2025.")
         if not lotes and not reembolsos:
             plan.error(nombre, "No parece un extracto «Plusvalías y minusvalías» de MyInvestor, o está vacío.")
             continue
@@ -430,11 +567,18 @@ def preparar_myinvestor(cfg, archivos, carpeta):
                                "necesita un fondo con precio en internet.")
             continue
         serie = res.serie(ref, lotes[-1][0] if lotes else None)
-        movs, sin_vl = myinvestor_a_movimientos(ref, lotes, reembolsos, serie)
-        if sin_vl:
-            plan.avisos.append(f"{isin}: {sin_vl} compras sin valor liquidativo de ese día; sus "
-                               "participaciones se han estimado con el valor del extracto.")
-        plan.reemplazar.append((ref, "myinvestor"))
+        if lotes and not serie:
+            # Sin serie de precios no hay VL con el que calcular: no se generan
+            # compras de 0 participaciones, se pide revisar el ISIN.
+            plan.error(nombre, "No encuentro el valor liquidativo de este fondo: comprueba que su "
+                               "ISIN tiene precio en internet.")
+            continue
+        movs, avisos, recon = myinvestor_a_movimientos(ref, lotes, reembolsos, serie)
+        plan.avisos.extend(avisos)
+        plan.reconciliacion.append({**recon, "isin": isin, "producto": ref,
+                                    "nombre": p.get("corto") or p.get("nombre")})
+        if (ref, "myinvestor") not in plan.reemplazar:
+            plan.reemplazar.append((ref, "myinvestor"))
         for mv in movs:
             plan.movimientos.append({**mv, "fila": nombre, "comision": None, "marcas": [],
                                      "origen": "myinvestor"})
@@ -469,13 +613,15 @@ def aplicar(cfg, plan):
         datos = {k: mv[k] for k in ("fecha", "tipo", "unidades", "importe", "comision", "nota") if mv.get(k) is not None}
         datos["producto"] = real(mv["producto"])
         estado = "nuevo"
-        if firma({**datos, "unidades": datos.get("unidades", 0)}) in existentes:
+        nuevo = firma({**datos, "unidades": datos.get("unidades", 0)})
+        if nuevo in existentes:
             duplicados += 1
             estado = "repetido"
         else:
             try:
                 guardado = almacen.guarda_movimiento(cfg, datos)
                 guardado["origen"] = mv["origen"]
+                existentes.add(nuevo)          # que la siguiente fila idéntica cuente como repetida
                 añadidos += 1
             except almacen.ErrorValidacion as e:
                 errores.append({"fila": mv["fila"], "mensaje": " ".join(e.errores)})
@@ -509,6 +655,7 @@ def aplicar(cfg, plan):
         "productosNuevos": [{**n["datos"], "id": ids.get(n["ref"]), "precio": n["precio"],
                              "monedaPrecio": n["monedaPrecio"], "fechaPrecio": n["fecha"],
                              "mercado": n["mercado"]} for n in plan.productos_nuevos],
+        "reconciliacion": list(getattr(plan, "reconciliacion", [])),
         "filas": sorted(filas, key=lambda f: f["fecha"], reverse=True),
     }
 
