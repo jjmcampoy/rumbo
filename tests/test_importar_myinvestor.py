@@ -41,7 +41,7 @@ def lote(fecha_iso, invertido, valor, resultado=""):
 
 
 def importar_lote(texto, serie_vl):
-    """Corta el extracto y devuelve (movs, sin_vl) de myinvestor_a_movimientos."""
+    """Corta el extracto y devuelve (movs, avisos, reconciliacion) de myinvestor_a_movimientos."""
     lotes, reembolsos, _ = importar.leer_csv_myinvestor(texto)
     return importar.myinvestor_a_movimientos("fondo", lotes, reembolsos, serie_vl)
 
@@ -89,14 +89,13 @@ def test_fila_real_coherente():
     vl_fecha = 20.0
     vl_hoy = 20.0 * VALOR / INVERTIDO          # 26.9025...
     serie_vl = {"2022-05-04": vl_fecha, HOY: vl_hoy}
-    movs, _ = importar_lote(EXTRACTO_REAL, serie_vl)
+    movs, _, recon = importar_lote(EXTRACTO_REAL, serie_vl)
     assert len(movs) == 1
     assert movs[0]["unidades"] == pytest.approx(INVERTIDO / 20.0)
     assert movs[0]["unidades"] * serie_vl[HOY] == pytest.approx(VALOR, rel=1e-6)
-    assert _reconciliacion(movs, serie_vl)["sospechosos"] == 0
+    assert recon["sospechosos"] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="I-02")
 def test_fila_real_traspaso():
     """
     Caso central del informe de fallo: el VL de la fecha fiscal corresponde al
@@ -104,10 +103,10 @@ def test_fila_real_traspaso():
     valor de mercado, no del coste.
     """
     vl_fecha, vl_hoy = 20.0, 40.0
-    movs, _ = importar_lote(EXTRACTO_REAL, serie({"2022-05-04": vl_fecha}))
+    movs, _, recon = importar_lote(EXTRACTO_REAL, serie({"2022-05-04": vl_fecha}))
     assert movs[0]["unidades"] == pytest.approx(VALOR / 40.0)
     assert movs[0]["unidades"] * vl_hoy == pytest.approx(VALOR, rel=1e-6)
-    assert _reconciliacion(movs, serie({"2022-05-04": vl_fecha}))["sospechosos"] == 1
+    assert recon["sospechosos"] == 1
     # Documentación del bug: la fórmula antigua (coste / VL de origen) daba
     # 3941.89 / 20.0 * 40.0 = 7883.78 €, un 48.69 % por encima del valor real.
     antiguo = (INVERTIDO / vl_fecha) * vl_hoy
@@ -123,7 +122,6 @@ def test_fecha_iso():
     assert sin_fecha == []
 
 
-@pytest.mark.xfail(strict=True, reason="I-02")
 def test_lote_traspaso_valor_correcto():
     """
     Caso sintético I-A de la tabla de auditoría: el valor de mercado manda, no
@@ -133,22 +131,21 @@ def test_lote_traspaso_valor_correcto():
     """
     texto = csv(lote("2019-03-01", 10000.0, 24000.0))
     serie_vl = {"2019-03-01": 18.0, HOY: 40.0}
-    movs, _ = importar_lote(texto, serie_vl)
+    movs, _, recon = importar_lote(texto, serie_vl)
     assert movs[0]["unidades"] == pytest.approx(600.0)
     assert movs[0]["unidades"] * 40.0 == pytest.approx(24000.0)
+    assert recon["valorCalculado"] == pytest.approx(24000.0, rel=0.01)
 
 
-@pytest.mark.xfail(strict=True, reason="I-02")
 def test_lote_sabado():
     """Lote fechado en sábado con VL del viernes: unidades > 0 y total coherente."""
     # 2022-05-07 es sábado; el VL disponible es el del viernes 2022-05-06.
     texto = csv(lote("2022-05-07", 1000.0, 1050.0))
-    movs, _ = importar_lote(texto, serie({"2022-05-06": 20.0}))
+    movs, _, _ = importar_lote(texto, serie({"2022-05-06": 20.0}))
     assert movs[0]["unidades"] > 0
     assert movs[0]["unidades"] * VL_HOY == pytest.approx(1050.0, rel=0.01)
 
 
-@pytest.mark.xfail(strict=True, reason="I-02")
 def test_invariante_reconciliacion():
     fixtures = [
         (EXTRACTO_REAL, {"2022-05-04": 20.0, HOY: 40.0}),
@@ -159,37 +156,41 @@ def test_invariante_reconciliacion():
         lotes, _, _ = importar.leer_csv_myinvestor(texto)
         invertido = sum(l[1] for l in lotes)
         valor = sum(l[2] for l in lotes)
-        movs, _ = importar_lote(texto, serie_vl)
+        movs, _, recon = importar_lote(texto, serie_vl)
         compras = [m for m in movs if m["tipo"] == "compra"]
         assert sum(m["importe"] for m in compras) == pytest.approx(invertido)
         calculado = sum(m["unidades"] for m in compras) * serie_vl[HOY]
         assert abs(calculado - valor) / valor <= 0.01
+        assert recon["valorCalculado"] == pytest.approx(valor, rel=0.01)
 
 
-@pytest.mark.xfail(strict=True, reason="I-02")
 def test_lote_con_valor_cero_e_inversion_positiva():
     """Inversión > 0 y Valor de mercado = 0: no debe inventar participaciones."""
     texto = csv(lote("2022-05-04", 500.0, 0.0))
-    movs, _ = importar_lote(texto, serie({"2022-05-04": 20.0}))
+    movs, avisos, _ = importar_lote(texto, serie({"2022-05-04": 20.0}))
     compras = [m for m in movs if m["tipo"] == "compra"]
     assert all(m["unidades"] == 0 for m in compras)
+    assert any("sin valor de mercado" in a for a in avisos)
 
 
 def test_dos_lotes_coherentes_sin_cambios():
     """Un archivo limpio de dos lotes ya cuadra al céntimo: no regredar."""
+    # VL coherente con el extracto: 10,00 en la fecha de cada compra y 11,00 hoy.
+    # Coste/NAV y valor/NAV coinciden en los dos lotes (100 y 200 participaciones).
     texto = csv(lote("2022-01-03", 1000.0, 1100.0), lote("2022-06-06", 2000.0, 2200.0))
-    serie_vl = serie({"2022-01-03": 10.0, "2022-06-06": 11.0})
-    movs, _ = importar_lote(texto, serie_vl)
+    serie_vl = {"2022-01-03": 10.0, "2022-06-06": 10.0, HOY: 11.0}
+    movs, _, recon = importar_lote(texto, serie_vl)
     assert len(movs) == 2
-    assert _reconciliacion(movs, serie_vl)["sospechosos"] == 0
+    assert recon["sospechosos"] == 0
+    assert recon["valorCalculado"] == pytest.approx(3300.0)
 
 
 def test_sin_vl_actual():
     """Sin serie VL y sin valor de mercado usable: 0 unidades y aviso, sin excepción."""
     texto = csv(lote("2022-05-04", 1000.0, 0.0))
-    movs, sin_vl = importar_lote(texto, {})
+    movs, avisos, _ = importar_lote(texto, {})
     assert movs[0]["unidades"] == 0
-    assert sin_vl == 1
+    assert any("valor liquidativo actual" in a for a in avisos)
 
 
 # ---------------------------------------------------------------- fechas y cabeceras (I-03)
@@ -244,17 +245,38 @@ def test_bom_utf8():
 
 # ---------------------------------------------------------------- ayuda
 
-def _reconciliacion(movs, serie_vl):
+def test_valor_de_extracto_extremo_usa_el_valor_de_mercado():
     """
-    Reconciliación de los movimientos contra el extracto: un lote es
-    'sospechoso' si su valor actual (unidades × VL de hoy) se desvía más del
-    1 % del valor de mercado del extracto.
+    Verifica la vía del valor de mercado con un extracto incoherente: el valor
+    de mercado (240.000 €) no cuadra con el coste (10.000 €), así que las
+    unidades salen de valor / VL actual. El guard 0,5 <= k <= 2 del recalibrado
+    es inalcanzable por construcción cuando las unidades salen del valor de
+    mercado: k = valor_total / calculado es siempre ~1, porque calculado ya es
+    Σ (valor_i / VL actual) × VL actual = valor_total.
     """
+    # Coste 10.000, VL de compra 18,00 -> 555,56 participaciones; con VL de hoy
+    # 40,00 el valor plausible es 22.222,22 €. El extracto dice 240.000 € (10x).
+    texto = csv(lote("2019-03-01", 10000.0, 240000.0))
+    serie_vl = {"2019-03-01": 18.0, HOY: 40.0}
+    movs, avisos, recon = importar_lote(texto, serie_vl)
+    # k = 240.000 / 240.000 = 1: las unidades salen del valor de mercado y el
+    # recalibrado no tiene nada que corregir; el desvío se reporta igual.
+    assert movs[0]["unidades"] == pytest.approx(240000.0 / 40.0, rel=1e-6)
+    assert recon["desvio"] == pytest.approx(0.0, abs=0.01)
+    assert recon["valorCalculado"] == pytest.approx(240000.0, rel=1e-6)
+
+
+def test_nota_por_lote_no_por_contador():
+    """
+    Regresión: la nota «(posible traspaso)» es por lote, no por el contador
+    acumulado. Un extracto cuyo primer lote es un traspaso y cuyo segundo es
+    coherente debe marcar SOLO el primero.
+    """
+    texto = csv(lote("2022-01-03", 3941.89, 5302.33), lote("2022-05-04", 1000.0, 4000.0))
+    serie_vl = serie({"2022-01-03": 20.0, "2022-05-04": 10.0})
+    movs, _, recon = importar_lote(texto, serie_vl)
     compras = [m for m in movs if m["tipo"] == "compra"]
-    sospechosos = 0
-    for m in compras:
-        vl = motor.valor_en(serie_vl, m["fecha"]) or VL_HOY
-        valor_esperado = m["unidades"] * vl
-        if m["importe"] and abs(valor_esperado - m["importe"]) / m["importe"] > 0.01:
-            sospechosos += 1
-    return {"sospechosos": sospechosos}
+    assert len(compras) == 2
+    assert compras[0]["nota"] == "MyInvestor (posible traspaso)"
+    assert compras[1]["nota"] == "MyInvestor"
+    assert recon["sospechosos"] == 1
