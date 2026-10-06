@@ -13,7 +13,7 @@
   const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
   // Escapa texto que viene de los datos antes de meterlo en HTML (evita XSS).
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+  const escHtml = s => String(s == null ? "" : s).replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // En la web exportada con «ocultar importes» no se enseña ninguna cantidad.
@@ -229,10 +229,10 @@
       });
       puntoTot.setAttribute("cx", x(i)); puntoTot.setAttribute("cy", y(totales[i]));
       let filas = series.map((s, k) => s.valores[i]
-        ? `<tr><td><i style="background:${s.color}"></i>${esc(s.nombre)}</td><td>${fV(s.valores[i])}</td></tr>` : "")
+        ? `<tr><td><i style="background:${s.color}"></i>${escHtml(s.nombre)}</td><td>${fV(s.valores[i])}</td></tr>` : "")
         .reverse().join("");
       if (cfg.overlay && cfg.overlay.valores[i] != null)
-        filas += `<tr class="sep"><td><i class="raya"></i>${esc(cfg.overlay.nombre)}</td><td>${fmtEur(cfg.overlay.valores[i])}</td></tr>`;
+        filas += `<tr class="sep"><td><i class="raya"></i>${escHtml(cfg.overlay.nombre)}</td><td>${fmtEur(cfg.overlay.valores[i])}</td></tr>`;
       tt.innerHTML = `<b>${fmtFecha(fechas[i])}</b><div class="ttTotal">${fV(totales[i])}</div>
         <table>${filas}</table>`;
       tt.classList.add("on");
@@ -347,7 +347,7 @@
       let extra = "";
       (porFecha[fechas[i]] || []).forEach(e => { extra += `<div class="ttEvento">${e.texto}</div>`; });
       if (cfg.overlay && cfg.overlay.valores[i] != null)
-        extra += `<table><tr><td><i class="raya"></i>${esc(cfg.overlay.nombre)}</td><td>${fmtEur(cfg.overlay.valores[i])}</td></tr></table>`;
+        extra += `<table><tr><td><i class="raya"></i>${escHtml(cfg.overlay.nombre)}</td><td>${fmtEur(cfg.overlay.valores[i])}</td></tr></table>`;
       tt.innerHTML = `<b>${fmtFecha(fechas[i])}</b><div class="ttTotal">${cfg.formatoTT ? cfg.formatoTT(vals[i]) : fmtEur(vals[i])}</div>${extra}`;
       tt.classList.add("on");
       colocaTooltip(tt, cont, x(i) * (r.width / W), ev.clientY - r.top);
@@ -424,7 +424,7 @@
       resalte.setAttribute("x", P.l + paso * i);
       resalte.setAttribute("opacity", 1);
       const filas = series.map(s => s.valores[i]
-        ? `<tr><td><i style="background:${s.color}"></i>${esc(s.nombre)}</td><td>${fV(s.valores[i])}</td></tr>` : "")
+        ? `<tr><td><i style="background:${s.color}"></i>${escHtml(s.nombre)}</td><td>${fV(s.valores[i])}</td></tr>` : "")
         .reverse().join("");
       tt.innerHTML = `<b>${fmtMes(cats[i])}</b><div class="ttTotal">${fmtEur(totales[i])}</div><table>${filas}</table>`;
       tt.classList.add("on");
@@ -473,7 +473,7 @@
     arcos.forEach(({ arco, d }) => {
       arco.addEventListener("pointerenter", () => {
         arco.classList.add("act");
-        tt.innerHTML = `<b>${esc(d.nombre)}</b><div class="ttTotal">${fmtEur(d.valor)}</div>
+        tt.innerHTML = `<b>${escHtml(d.nombre)}</b><div class="ttTotal">${fmtEur(d.valor)}</div>
           <table><tr><td>Peso</td><td>${fmtPct(d.valor / total, 1)}</td></tr></table>`;
         tt.classList.add("on");
       });
@@ -666,7 +666,7 @@
         if (v != null) { puntos[k].setAttribute("cx", x(i)); puntos[k].setAttribute("cy", y(v)); }
       });
       tt.innerHTML = `<b>${fmtFecha(fechas[i])}</b><table>` + orden.map(o =>
-        `<tr${o.s.destacado ? ' class="sep"' : ""}><td><i style="background:${o.s.color}"></i>${esc(o.s.nombre)}</td>
+        `<tr${o.s.destacado ? ' class="sep"' : ""}><td><i style="background:${o.s.color}"></i>${escHtml(o.s.nombre)}</td>
          <td>${(cfg.formatoValor || (v => v.toFixed(1)))(o.v)}</td></tr>`).join("") + "</table>";
       tt.classList.add("on");
       colocaTooltip(tt, cont, x(i) * (r.width / W), ev.clientY - r.top);
@@ -749,7 +749,7 @@
       resalte.setAttribute("opacity", 1);
       const fV = cfg.formatoValor || fmtEur;
       const filas = series.map(s => s.valores[i] == null ? "" :
-        `<tr><td><i style="background:${s.color}"></i>${esc(s.nombre)}</td><td>${fV(s.valores[i])}</td></tr>`).join("");
+        `<tr><td><i style="background:${s.color}"></i>${escHtml(s.nombre)}</td><td>${fV(s.valores[i])}</td></tr>`).join("");
       const total = series.reduce((a, s) => a + (s.valores[i] || 0), 0);
       tt.innerHTML = `<b>${cfg.formatoCat ? cfg.formatoCat(cats[i]) : cats[i]}</b>` +
         `<div class="ttTotal">${fV(total)}</div><table>${filas}</table>`;
