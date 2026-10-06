@@ -4,9 +4,11 @@
 import copy
 import io
 import json
+import os
+import stat
 
 from app import almacen
-from tests.conftest import CARTERA_MINIMA, cartera_en_disco
+from tests.conftest import CARTERA_MINIMA, cartera_en_disco, _jsons_de_datos
 
 
 def _copia():
@@ -80,3 +82,13 @@ def test_subir_copia_mala_no_toca_la_cartera(cliente, entorno):
     assert r.get_json()["ok"] is False
     ahora = json.load(open(servidor.DATOS + "/cartera.json", encoding="utf-8"))
     assert ahora == antes
+
+
+def test_permisos(cliente, entorno):
+    servidor, datos = entorno
+    r = cliente.post("/api/empezar", json={}, headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    archivos = list(_jsons_de_datos(datos))          # ayuda definida en conftest.py
+    assert archivos, "no se ha escrito ningún JSON"
+    for p in archivos:
+        assert stat.S_IMODE(os.stat(p).st_mode) & 0o077 == 0, p

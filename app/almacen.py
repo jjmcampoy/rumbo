@@ -104,7 +104,7 @@ def guarda(ruta, cfg):
     carpeta = os.path.dirname(ruta)
     copias = os.path.join(carpeta, "copias")
     if os.path.exists(ruta):
-        os.makedirs(copias, exist_ok=True)
+        os.makedirs(copias, mode=0o700, exist_ok=True)
         sello = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         with open(ruta, "rb") as f, open(os.path.join(copias, f"auto_{sello}.json"), "wb") as g:
             g.write(f.read())
@@ -114,7 +114,9 @@ def guarda(ruta, cfg):
     tmp = ruta + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o600)
     os.replace(tmp, ruta)
+    os.chmod(ruta, 0o600)
 
 
 # ---------------------------------------------------------------- ayudas

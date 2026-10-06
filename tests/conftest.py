@@ -71,3 +71,10 @@ def cartera_en_disco(datos_dir, datos=None):
     ruta = os.path.join(str(datos_dir), "cartera.json")
     escribe_json(ruta, datos or CARTERA_MINIMA)
     return ruta
+
+def _jsons_de_datos(datos_dir):
+    """Todos los *.json bajo la carpeta de datos, en cualquier profundidad."""
+    for raiz, _dirs, nombres in os.walk(str(datos_dir)):
+        for n in nombres:
+            if n.endswith(".json"):
+                yield os.path.join(raiz, n)

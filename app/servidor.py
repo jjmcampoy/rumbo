@@ -94,7 +94,9 @@ def escribe_json(ruta, datos):
     tmp = ruta + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(datos, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o600)
     os.replace(tmp, ruta)
+    os.chmod(ruta, 0o600)
 
 
 def modo():
@@ -503,6 +505,8 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    # Los archivos nuevos (caché, histórico) heredan permisos restrictivos.
+    os.umask(0o077)
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Si la app ya está abierta (otra ventana), basta con enseñarla.
