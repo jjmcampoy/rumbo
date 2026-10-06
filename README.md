@@ -32,6 +32,7 @@ Herramienta **gratuita** hecha por **Dani Dominguez Quant**. Si te resulta útil
 - [Actualizar a una versión nueva](#actualizar-a-una-versión-nueva)
 - [Preguntas frecuentes](#preguntas-frecuentes)
 - [Privacidad](#privacidad)
+- [Seguridad](#seguridad)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Para curiosos: cómo está hecho](#para-curiosos-cómo-está-hecho)
 - [Licencia](#licencia)
@@ -286,7 +287,7 @@ En **Mis datos → Copias y web → Publicar como web** descargas tu panel en **
 1. Crea una carpeta, mete dentro el archivo y cámbiale el nombre a `index.html`.
 2. Entra en [app.netlify.com/drop](https://app.netlify.com/drop) y arrastra la carpeta. En unos segundos te da una dirección para compartir.
 
-Con la opción **«Ocultar importes»**, las cantidades en euros **no van dentro del archivo** (ni siquiera escondidas en el código): solo se ven los porcentajes y la forma de las gráficas.
+Con la opción **«Ocultar importes»**, las cantidades en euros se multiplican por un factor aleatorio antes de meterlas en el archivo, así que no se leen de un vistazo. **Pero ojo: las proporciones, los nombres, las fechas y los porcentajes sí son públicos** (los porcentajes se ven igual con o sin importes). Si eso te importa, publica solo los porcentajes o no publiques el panel.
 
 ---
 
@@ -331,8 +332,14 @@ Lee el mensaje de la ventana: casi siempre dice qué pasa. Lo más habitual es n
 ## Privacidad
 
 - Tus datos se guardan **solo en tu ordenador**, en la carpeta `mis_datos`. No hay cuentas, ni servidores, ni nadie más que los vea.
-- La app solo sale a internet para descargar precios (Morningstar, Yahoo Finance y CoinGecko) y para comprobar si hay una versión nueva en GitHub. En esas consultas no va ningún dato tuyo.
+- Lo único que sale de tu máquina son las **consultas de precios**: el ISIN, el ticker o el texto que escribes en el buscador, hacia Yahoo Finance, Morningstar y CoinGecko, y la comprobación de si hay una versión nueva, hacia GitHub. No se envía ninguna cifra tuya ni ningún dato personal.
+- El panel **no habla ya con terceros desde el navegador**: el precio en vivo de la cripto lo pide a nuestro propio servidor (`GET /api/vivo`), que es el único que sale a internet.
 - El servidor de la app solo escucha en tu propio ordenador (`127.0.0.1`): nadie de tu red puede entrar.
+- La página exportada («Publicar tu panel como web») **solo se sube a internet si tú la subes**: la app no la envía a ningún sitio.
+
+## Seguridad
+
+El diseño es local y de un solo usuario: **la app no tiene autenticación y no debe exponerse a internet**. Para desplegarla en tu red (por ejemplo, en un NAS), ponla detrás de un proxy y fija la variable de entorno **`RUMBO_HOSTS`** con los nombres por los que se podrá abrir (por defecto solo `127.0.0.1` y `localhost`). Los detalles —cómo reportar una vulnerabilidad, las cabeceras de seguridad y las limitaciones— están en [`SECURITY.md`](SECURITY.md).
 
 ---
 
@@ -342,6 +349,9 @@ Lee el mensaje de la ventana: casi siempre dice qué pasa. Lo más habitual es n
 - Del CSV de MyInvestor solo se conoce la **plusvalía** de lo ya vendido, no la fecha de venta: tu patrimonio de hoy sale bien, pero la curva no refleja cuándo vendiste.
 - No calcula **impuestos**.
 - La versión de **Mac** no se ha podido probar en un Mac real.
+- Es de **un solo usuario**: no hay cuentas ni autenticación, y no debe exponerse a internet (ver [SECURITY.md](SECURITY.md)).
+- Los datos de `mis_datos` **no están cifrados** en disco.
+- No hay **multi-cartera** hasta la versión 1.2: una sola cartera por instalación.
 
 ---
 
