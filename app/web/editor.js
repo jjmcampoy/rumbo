@@ -762,7 +762,55 @@
   }
 
   /* ---------------------------------------------- portfolios */
-  const CAR = { lista: null, hayEjemplo: null };
+  const CAR = { lista: null, hayEjemplo: null, resumen: null };
+
+  /* Comparar carteras: cifras de cada una (de su cálculo guardado) y un total. */
+  function filaResumen(f) {
+    const acc = `<td class="acc">${f.activa ? ""
+      : `<button data-acc="carteraActivar" data-id="${esc(f.id)}">Activar</button>`}</td>`;
+    if (f.error) {
+      return `<tr class="est-error"><td style="text-align:left">${esc(f.nombre)}</td>
+        <td colspan="6" style="text-align:left" class="neg">⚠ ${esc(f.error)}</td>${acc}</tr>`;
+    }
+    return `<tr${f.activa ? ' class="activa"' : ""}>
+      <td style="text-align:left">${esc(f.nombre)}${f.activa ? " <small>(activa)</small>" : ""}</td>
+      <td>${eur(f.patrimonio)}</td><td>${eur(f.aportado)}</td><td>${eur(f.plusvalia)}</td>
+      <td>${f.rentabilidad == null ? "—" : num(f.rentabilidad * 100, 2) + " %"}</td>
+      <td>${f.tir == null ? "—" : num(f.tir * 100, 2) + " %"}</td>
+      <td>${f.nProductos ?? "—"}</td>${acc}</tr>`;
+  }
+
+  function seccionComparar() {
+    if (CAR.resumen === null) {
+      api("GET", "api/carteras/resumen").then(j => {
+        CAR.resumen = j;
+        if (E.vista === "carteras") pinta();
+      }).catch(() => { CAR.resumen = { carteras: [], total: null, error: "No se ha podido calcular el resumen." };
+        if (E.vista === "carteras") pinta(); });
+    }
+    const r = CAR.resumen;
+    if (!r) {
+      return `<section class="tarjeta"><header><h2>Comparar</h2>
+        <span class="subt">¿Qué cartera ha ganado más? Cifras de cada cartera y el total conjunto.</span>
+        <span class="sp"></span><button class="btn" data-acc="carteraRecalcular">Recalcular</button></header>
+      <p class="cargando">Cargando…</p></section>`;
+    }
+    const filas = (r.carteras || []).map(filaResumen).join("");
+    const t = r.total || {};
+    const total = `<tr class="total"><td style="text-align:left"><b>TOTAL</b></td>
+      <td><b>${eur(t.patrimonio)}</b></td><td><b>${eur(t.aportado)}</b></td><td><b>${eur(t.plusvalia)}</b></td>
+      <td><b>${t.rentabilidad == null ? "—" : num(t.rentabilidad * 100, 2) + " %"}</b></td>
+      <td><b>${t.tir == null ? "—" : num(t.tir * 100, 2) + " %"}</b></td>
+      <td><b>${(r.carteras || []).reduce((s, f) => s + (f.nProductos || 0), 0)}</b></td><td></td></tr>`;
+    const aviso = r.error ? `<div class="av"><span>⚠</span><span>${esc(r.error)}</span></div>` : "";
+    return `<section class="tarjeta"><header><h2>Comparar</h2>
+        <span class="subt">¿Qué cartera ha ganado más? Cifras de cada cartera y el total conjunto.</span>
+        <span class="sp"></span><button class="btn" data-acc="carteraRecalcular">Recalcular</button></header>
+      ${aviso}
+      <div class="tablaEnv"><table class="dt"><thead><tr><th style="text-align:left">Cartera</th>
+        <th>Valor</th><th>Aportado</th><th>Plusvalía</th><th>Rentabilidad</th><th>TIR</th>
+        <th>Productos</th><th></th></tr></thead><tbody>${filas}${total}</tbody></table></div></section>`;
+  }
 
   function vistaCarteras() {
     if (CAR.lista === null) {
@@ -790,6 +838,8 @@
         : `<div class="tablaEnv alto"><table class="dt"><thead><tr><th style="text-align:left">Nombre</th>
           <th>Productos</th><th>Creada</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`}
       </section>
+
+      ${seccionComparar()}
 
       <section class="tarjeta"><header><h2>Nueva cartera</h2>
         <span class="subt">Vacía, o como copia de otra cartera o del ejemplo.</span></header>
@@ -1009,6 +1059,7 @@
     carteraRenombrar: soloPropio(renombrarCartera),
     carteraDuplicar: soloPropio(duplicarCartera),
     carteraBorrar: soloPropio(borrarCartera),
+    carteraRecalcular() { CAR.resumen = null; pinta(); },
     exportarWeb() { location.href = "api/exportar-web?ocultar=" + ($("#webOcultar").checked ? "1" : "0"); },
     verPanelDatos() { recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); },
     async imCopiar() {

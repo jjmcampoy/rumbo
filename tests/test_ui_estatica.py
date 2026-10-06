@@ -25,6 +25,7 @@ def test_marcado_ui():
     editor = _lee("editor.js")
     for aguja in ("api/carteras", "carteras/extraer", "activar", "__nueva__"):
         assert aguja in editor, aguja
+    assert "api/carteras/resumen" in editor
 
 
 def test_selector_oculto_en_el_html():
