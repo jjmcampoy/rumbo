@@ -77,18 +77,24 @@ def decodifica(crudo):
 
 CAB_MYINVESTOR = {"fecha": ["fecha fiscal", "fecha"],
                   "coste": ["inversion", "inversión", "coste"],
-                  "valor": ["valor de mercado", "valor mercado", "valor"]}
+                  "valor": ["valor de mercado", "valor mercado", "valor"],
+                  "resultado": ["resultado fiscal", "resultado", "plusvalía", "plusvalia",
+                                "ganancia", "pérdida", "perdida"]}
 
 
 def leer_csv_myinvestor(texto):
     """
     Lee el CSV "Plusvalías y minusvalías" de un fondo de MyInvestor.
-    Devuelve (lotes, reembolsos): lotes = [[fecha, coste, valor]] de lo que sigues
-    teniendo; reembolsos = [[fecha, resultado]] de lo ya vendido, del que el extracto
-    solo da la plusvalía.
+    Devuelve (lotes, reembolsos, sin_fecha): lotes = [[fecha, coste, valor]] de lo
+    que sigues teniendo; reembolsos = [[fecha, resultado]] de lo ya vendido, del
+    que el extracto solo da la plusvalía; sin_fecha = [(número de fila, texto)]
+    de las filas cuya fecha no se entiende, para que el plan las reporte.
     """
     texto = decodifica(texto)
-    delim = ";" if texto.count(";") >= texto.count(",") else ","
+    # El separador se decide solo con la cabecera: el cuerpo puede contener
+    # comas dentro de los números (1.234,56) y engañaría al recuento.
+    primera = texto.splitlines()[0] if texto.splitlines() else ""
+    delim = ";" if primera.count(";") >= primera.count(",") else ","
     filas = [f for f in csv.reader(io.StringIO(texto), delimiter=delim)
              if any((c or "").strip() for c in f)]
     if not filas:
@@ -102,24 +108,27 @@ def leer_csv_myinvestor(texto):
                 return i
         return defecto
 
-    ic, ico, iv = col("fecha", 0), col("coste", 1), col("valor", 2)
-    lotes, reembolsos = [], []
-    for fila in filas[1:]:
-        if len(fila) <= max(ic, ico, iv):
+    ic, ico, iv, ir = col("fecha", 0), col("coste", 1), col("valor", 2), col("resultado", 3)
+    lotes, reembolsos, sin_fecha = [], [], []
+    for n, fila in enumerate(filas[1:], start=2):
+        if len(fila) <= max(ic, ico, iv, ir):
             continue
-        m = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", fila[ic])
-        if not m:
+        # Primero ISO (aaaa-mm-dd), luego día primero (dd/mm/aaaa): los extractos
+        # son españoles. Se reutiliza la validación de lee_fecha (rangos de
+        # mes/día, año de 2 dígitos -> 20xx).
+        fecha = lee_fecha(fila[ic]) or _lee_fecha_ddmmyyyy(fila[ic])
+        if not fecha:
+            sin_fecha.append((n, fila[ic]))
             continue
-        fecha = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
         coste, valor = num_es(fila[ico]), num_es(fila[iv])
         if coste <= 0 and valor <= 0:
             # Participaciones ya reembolsadas: solo queda el resultado fiscal.
-            if len(fila) > 3 and num_es(fila[3]):
-                reembolsos.append([fecha, round(num_es(fila[3]), 2)])
+            if len(fila) > ir and num_es(fila[ir]):
+                reembolsos.append([fecha, round(num_es(fila[ir]), 2)])
             continue
         lotes.append([fecha, round(coste, 2), round(valor, 2)])
     lotes.sort(key=lambda x: x[0])
-    return lotes, reembolsos
+    return lotes, reembolsos, sin_fecha
 
 
 def myinvestor_a_movimientos(producto_id, lotes, reembolsos, serie_vl):
@@ -130,11 +139,13 @@ def myinvestor_a_movimientos(producto_id, lotes, reembolsos, serie_vl):
     dos días antes y saldrían participaciones erróneas.
     """
     # VL con el que MyInvestor valoró el extracto, para los lotes sin VL de compra.
-    estimados = sorted(serie_vl[f] * v / c for f, c, v in lotes if serie_vl.get(f) and c > 0)
+    estimados = sorted(valor_en(serie_vl, f, margen=7) * v / c
+                       for f, c, v in lotes if valor_en(serie_vl, f, margen=7) and c > 0)
     vl_extracto = estimados[len(estimados) // 2] if estimados else None
     movs, sin_vl = [], 0
     for fecha, coste, valor in lotes:
-        vc = serie_vl.get(fecha)
+        # Tolerante: un lote fechado en sábado toma el VL del viernes anterior.
+        vc = valor_en(serie_vl, fecha, margen=7) if serie_vl else None
         if vc:
             unidades = coste / vc
         elif vl_extracto:
@@ -217,6 +228,19 @@ def lee_fecha(v):
             return None
         a = int(m.group(3)) + (2000 if len(m.group(3)) == 2 else 0)
         me, di = int(m.group(2)), int(m.group(1))
+    try:
+        return dt.date(a, me, di).isoformat()
+    except ValueError:   # un 31 de febrero, un mes 13...
+        return None
+
+
+def _lee_fecha_ddmmyyyy(t):
+    """Fecha día primero (dd/mm/aaaa o dd-mm-aaaa), con la validación de lee_fecha."""
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})", str(t or "").strip())
+    if not m:
+        return None
+    a = int(m.group(3)) + (2000 if len(m.group(3)) == 2 else 0)
+    me, di = int(m.group(2)), int(m.group(1))
     try:
         return dt.date(a, me, di).isoformat()
     except ValueError:   # un 31 de febrero, un mes 13...
@@ -419,7 +443,10 @@ def preparar_myinvestor(cfg, archivos, carpeta):
                                "MyInvestor sin cambiarle el nombre (lleva el ISIN del fondo).")
             continue
         isin = m.group(1)
-        lotes, reembolsos = leer_csv_myinvestor(contenido)
+        lotes, reembolsos, sin_fecha = leer_csv_myinvestor(contenido)
+        for n, texto_fecha in sin_fecha:
+            plan.error(nombre, f"Fila {n}: la fecha «{texto_fecha}» no se entiende. "
+                               "Usa el formato 2025-03-10 o 10/03/2025.")
         if not lotes and not reembolsos:
             plan.error(nombre, "No parece un extracto «Plusvalías y minusvalías» de MyInvestor, o está vacío.")
             continue

@@ -42,7 +42,7 @@ def lote(fecha_iso, invertido, valor, resultado=""):
 
 def importar_lote(texto, serie_vl):
     """Corta el extracto y devuelve (movs, sin_vl) de myinvestor_a_movimientos."""
-    lotes, reembolsos = importar.leer_csv_myinvestor(texto)
+    lotes, reembolsos, _ = importar.leer_csv_myinvestor(texto)
     return importar.myinvestor_a_movimientos("fondo", lotes, reembolsos, serie_vl)
 
 
@@ -50,14 +50,15 @@ def importar_lote(texto, serie_vl):
 
 def test_lee_csv_basico():
     """El extracto real se lee ya: una compra, sin reembolsos."""
-    lotes, reembolsos = importar.leer_csv_myinvestor(EXTRACTO_REAL)
+    lotes, reembolsos, sin_fecha = importar.leer_csv_myinvestor(EXTRACTO_REAL)
     assert lotes == [["2022-05-04", INVERTIDO, VALOR]]
     assert reembolsos == []
+    assert sin_fecha == []
 
 
 def test_resultado_fiscal_no_es_un_reembolso():
     """Guarda de regresión: con Resultado fiscal != 0 la fila es una COMPRA."""
-    lotes, reembolsos = importar.leer_csv_myinvestor(EXTRACTO_REAL)
+    lotes, reembolsos, _ = importar.leer_csv_myinvestor(EXTRACTO_REAL)
     assert reembolsos == []
     assert lotes and lotes[0][0] == "2022-05-04"
     # Identidad de la fila real: si MyInvestor cambia el sentido de la columna,
@@ -71,7 +72,7 @@ def test_reembolso_cero_cero():
     0,00;0,00 con resultado fiscal se lee como reembolso. Documenta la única
     forma que el código actual reconoce.
     """
-    lotes, reembolsos = importar.leer_csv_myinvestor(csv(lote("2022-05-04", 0.0, 0.0, 123.45)))
+    lotes, reembolsos, _ = importar.leer_csv_myinvestor(csv(lote("2022-05-04", 0.0, 0.0, 123.45)))
     assert lotes == []
     assert reembolsos == [["2022-05-04", 123.45]]
 
@@ -114,12 +115,12 @@ def test_fila_real_traspaso():
     assert (antiguo - VALOR) / VALOR == pytest.approx(0.4869, abs=0.001)
 
 
-@pytest.mark.xfail(strict=True, reason="I-03")
 def test_fecha_iso():
-    """Una fecha ya en ISO (aaaa-mm-dd) debe leerse; hoy se descarta en silencio."""
+    """Una fecha ya en ISO (aaaa-mm-dd) debe leerse; antes se descartaba en silencio."""
     texto = CABECERA + f"2020-01-15;100,00;120,00;\n"
-    lotes, _ = importar.leer_csv_myinvestor(texto)
+    lotes, _, sin_fecha = importar.leer_csv_myinvestor(texto)
     assert lotes == [["2020-01-15", 100.0, 120.0]]
+    assert sin_fecha == []
 
 
 @pytest.mark.xfail(strict=True, reason="I-02")
@@ -137,7 +138,7 @@ def test_lote_traspaso_valor_correcto():
     assert movs[0]["unidades"] * 40.0 == pytest.approx(24000.0)
 
 
-@pytest.mark.xfail(strict=True, reason="I-02/I-03")
+@pytest.mark.xfail(strict=True, reason="I-02")
 def test_lote_sabado():
     """Lote fechado en sábado con VL del viernes: unidades > 0 y total coherente."""
     # 2022-05-07 es sábado; el VL disponible es el del viernes 2022-05-06.
@@ -149,16 +150,20 @@ def test_lote_sabado():
 
 @pytest.mark.xfail(strict=True, reason="I-02")
 def test_invariante_reconciliacion():
-    """Para cada fixture: Σ importe == Σ inversión y el total valorado cuadra."""
     fixtures = [
-        (EXTRACTO_REAL, serie({"2022-05-04": 20.0})),
-        (csv(lote("2022-05-04", 12000.0, 24000.0)), serie({"2022-05-04": 20.0})),
-        (csv(lote("2022-05-07", 1000.0, 1050.0)), serie({"2022-05-06": 20.0})),
+        (EXTRACTO_REAL, {"2022-05-04": 20.0, HOY: 40.0}),
+        (csv(lote("2019-03-01", 10000.0, 24000.0)), {"2019-03-01": 18.0, HOY: 40.0}),
+        (csv(lote("2022-05-07", 1000.0, 1050.0)), {"2022-05-06": 20.0, HOY: 40.0}),
     ]
     for texto, serie_vl in fixtures:
+        lotes, _, _ = importar.leer_csv_myinvestor(texto)
+        invertido = sum(l[1] for l in lotes)
+        valor = sum(l[2] for l in lotes)
         movs, _ = importar_lote(texto, serie_vl)
-        r = _reconciliacion(movs, serie_vl)
-        assert r["sospechosos"] == 0
+        compras = [m for m in movs if m["tipo"] == "compra"]
+        assert sum(m["importe"] for m in compras) == pytest.approx(invertido)
+        calculado = sum(m["unidades"] for m in compras) * serie_vl[HOY]
+        assert abs(calculado - valor) / valor <= 0.01
 
 
 @pytest.mark.xfail(strict=True, reason="I-02")
@@ -185,6 +190,56 @@ def test_sin_vl_actual():
     movs, sin_vl = importar_lote(texto, {})
     assert movs[0]["unidades"] == 0
     assert sin_vl == 1
+
+
+# ---------------------------------------------------------------- fechas y cabeceras (I-03)
+
+def test_fecha_no_interpretable_se_reporta():
+    """Una fecha imposible (31/02) no se descarta: se devuelve para que el plan la reporte."""
+    texto = CABECERA + "31/02/2022;100,00;120,00;\n"
+    lotes, reembolsos, sin_fecha = importar.leer_csv_myinvestor(texto)
+    assert lotes == []
+    assert reembolsos == []
+    assert sin_fecha == [(2, "31/02/2022")]
+
+
+def test_fecha_mm_dd_rechazada():
+    """Un 05/04/2022 se lee día primero (5 de abril); un 13/12/2022 no existe y se reporta."""
+    lotes, _, _ = importar.leer_csv_myinvestor(CABECERA + "05/04/2022;100,00;120,00;\n")
+    assert lotes == [["2022-04-05", 100.0, 120.0]]
+    _, _, sin_fecha = importar.leer_csv_myinvestor(CABECERA + "31/13/2022;100,00;120,00;\n")
+    assert sin_fecha == [(2, "31/13/2022")]
+
+
+def test_cabecera_reordenada():
+    """Con las columnas en otro orden, cada una se encuentra por su nombre."""
+    texto = ("Inversión;Fecha fiscal;Resultado fiscal;Valor de mercado\n"
+             "3941,89;04/05/2022;1360,44;5302,33\n")
+    lotes, reembolsos, sin_fecha = importar.leer_csv_myinvestor(texto)
+    assert lotes == [["2022-05-04", INVERTIDO, VALOR]]
+    assert reembolsos == []
+    assert sin_fecha == []
+    # Y el reembolso se lee de la columna de resultado, dondequiera que esté.
+    texto = ("Inversión;Fecha fiscal;Resultado fiscal;Valor de mercado\n"
+             "0,00;04/05/2022;123,45;0,00\n")
+    _, reembolsos, _ = importar.leer_csv_myinvestor(texto)
+    assert reembolsos == [["2022-05-04", 123.45]]
+
+
+def test_delimitador_por_cabecera():
+    """El separador se decide con la cabecera: los comas de 1.234,56 no lo engañan."""
+    texto = "Fecha fiscal;Inversión;Valor de mercado;Resultado fiscal\n" \
+            "04/05/2022;1.234,56;2.345,67;\n"
+    lotes, _, _ = importar.leer_csv_myinvestor(texto)
+    assert lotes == [["2022-05-04", 1234.56, 2345.67]]
+
+
+def test_bom_utf8():
+    """Un BOM al principio no rompe el nombre de la primera columna."""
+    texto = "\ufeff" + CABECERA + "04/05/2022;100,00;120,00;\n"
+    lotes, _, sin_fecha = importar.leer_csv_myinvestor(texto)
+    assert lotes == [["2022-05-04", 100.0, 120.0]]
+    assert sin_fecha == []
 
 
 # ---------------------------------------------------------------- ayuda
