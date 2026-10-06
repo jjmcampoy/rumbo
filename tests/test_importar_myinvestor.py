@@ -393,3 +393,51 @@ def test_importar_myinvestor_dos_veces(entorno, monkeypatch):
     assert segundo["añadidos"] == n
     assert segundo["repetidos"] == 0
     assert cfg == copia
+
+
+# ---------------------------------------------------------------- saldos de productos cotizados (I-05)
+
+def test_saldo_de_producto_cotizado_se_rechaza(entorno, monkeypatch):
+    """Un saldo de un producto con precio automático no se descarta en silencio: se reporta."""
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    filas = [(1, {"fecha": "2022-05-04", "tipo_movimiento": "saldo",
+                  "identificador": ISIN, "importe": "5000"})]
+    plan = importar.preparar_tabla(cfg, filas, str(datos_dir))
+    assert any("precio automático" in e["mensaje"] for e in plan.errores)
+    assert plan.valoraciones == []
+    assert plan.movimientos == []
+    informe = importar.aplicar(cfg, plan)
+    assert informe["añadidos"] == 0
+    assert cfg["valoraciones"] == []
+
+
+def test_saldo_de_producto_manual_se_acepta(entorno, monkeypatch):
+    """El mismo saldo, para un producto con «Valor anotado a mano», sí se anota."""
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = {"productos": [{"id": "manual", "nombre": "Inmueble", "corto": "Inmueble",
+                          "tipo": "inmueble", "fuente": "manual", "moneda": "EUR"}],
+           "movimientos": [], "valoraciones": []}
+    filas = [(1, {"fecha": "2022-05-04", "tipo_movimiento": "saldo",
+                  "nombre": "Inmueble", "importe": "5000"})]
+    plan = importar.preparar_tabla(cfg, filas, str(datos_dir))
+    assert plan.errores == []
+    assert len(plan.valoraciones) == 1
+    assert plan.valoraciones[0]["valor"] == 5000.0
+    informe = importar.aplicar(cfg, plan)
+    assert informe["saldos"] == 1
+    assert len(cfg["valoraciones"]) == 1
+
+
+def test_construir_avisa_de_valores_no_usados(entorno, monkeypatch):
+    """Un producto cotizado con valores anotados a mano avisa de que no se usan."""
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    cfg["movimientos"] = [{"id": "m1", "fecha": "2022-05-04", "producto": "fondo",
+                           "tipo": "compra", "unidades": 10, "importe": 200.0}]
+    cfg["valoraciones"] = [{"id": "v1", "fecha": "2022-05-04", "producto": "fondo", "valor": 999.0}]
+    datos = motor.construir(cfg, str(datos_dir), descargar=False)
+    assert any("no se usan porque su precio es automático" in a for a in datos["avisos"])

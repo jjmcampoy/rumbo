@@ -462,6 +462,14 @@ def preparar_tabla(cfg, filas, carpeta):
         ref = res.producto(n, ident, nombre, tprod)
         if not ref:
             continue
+        if tipo == "saldo":
+            # Un saldo de un producto con precio automático se perdería en silencio: se rechaza.
+            p = res.datos(ref)
+            if p and p.get("fuente") != "manual" and p.get("tipo") not in almacen.SOLO_SALDO:
+                plan.error(n, f"«{p.get('corto') or p['nombre']}» tiene precio automático: los saldos solo se "
+                              "anotan en productos con «Valor anotado a mano». Cambia su fuente de precio o "
+                              "anota esa operación como compra.")
+                continue
         marcas = []
 
         # Importes en otra moneda: se pasan a euros con el cambio de ese día.

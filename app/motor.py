@@ -660,6 +660,8 @@ def construir(cfg, carpeta, descargar=True):
                 continue
 
         if cotiza:
+            if snaps:
+                aviso(f"{p['corto']}: tiene valores anotados a mano que no se usan porque su precio es automático.")
             if not mv["eventos"]:
                 aviso(f"{p['corto']}: no tiene compras anotadas, lo dejo fuera.")
                 continue
