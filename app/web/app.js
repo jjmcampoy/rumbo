@@ -1051,20 +1051,12 @@
 
   /* ---------------------------------------------- bitcoin en vivo */
   async function traeBtc() {
-    const coin = D.vivo.coin || "bitcoin";
-    const fuentes = [
-      [`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coin)}&vs_currencies=eur`, j => j[coin] && j[coin].eur],
-    ];
-    if (coin === "bitcoin") fuentes.push(["https://api.binance.com/api/v3/ticker/price?symbol=BTCEUR", j => parseFloat(j.price)]);
-    for (const [url, extrae] of fuentes) {
-      try {
-        const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) continue;
-        const v = extrae(await r.json());
-        if (v && isFinite(v)) return v;
-      } catch (e) { /* probamos la siguiente */ }
-    }
-    return null;
+    try {
+      const r = await fetch("api/vivo", { cache: "no-store" });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return (j && j.ok && isFinite(j.precio)) ? j.precio : null;
+    } catch (e) { return null; }
   }
   async function actualizaVivo() {
     if (!D.vivo) return;
@@ -1179,6 +1171,8 @@
     irA_.style.marginTop = "24px";
     pintarTab();
   }
-  actualizaVivo();
-  setInterval(actualizaVivo, 60000);
+  if (!window.ESTATICO) {
+    actualizaVivo();
+    setInterval(actualizaVivo, 60000);
+  }
 })();

@@ -181,6 +181,23 @@ def api_buscar():
     return jsonify(resultados=res, sinConexion=(not res and bool(buscar.hubo_fallos_desde(n))))
 
 
+@app.get("/api/vivo")
+def api_vivo():
+    """Precio actual de la cripto del producto en vivo; lo pide el panel a nuestro
+    propio servidor (antes el navegador llamaba a CoinGecko y Binance)."""
+    calc = lee_json(ruta_calculado()) or {}
+    vivo = calc.get("vivo") or {}
+    coin = vivo.get("coin")
+    if not coin:
+        return jsonify(ok=False, errores=["No hay ningún producto en vivo."]), 404
+    with cerrojo:
+        p = buscar.probar("coingecko", coin)
+    if not p or not p.get("precio"):
+        return jsonify(ok=False, errores=["Sin precio en vivo ahora mismo."]), 502
+    return jsonify(ok=True, coin=coin, precio=p["precio"], fecha=p.get("fecha"),
+                   moneda=p.get("moneda") or "EUR")
+
+
 GUARDAR = {"productos": almacen.guarda_producto, "movimientos": almacen.guarda_movimiento,
            "valoraciones": almacen.guarda_valoracion}
 BORRAR = {"productos": almacen.borra_producto, "movimientos": almacen.borra_movimiento,

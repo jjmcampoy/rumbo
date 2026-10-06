@@ -83,7 +83,7 @@ def pagina(web, datos, ocultar=False, titulo="Mi patrimonio"):
 
     if ocultar:
         datos = sin_importes(datos)
-    datos = dict(datos, modo="estatico", avisos=[])
+    datos = dict(datos, modo="estatico", avisos=[], vivo=None)
     html = lee("index.html")
 
     # Fuera lo que solo tiene sentido dentro de la app.
