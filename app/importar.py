@@ -174,6 +174,8 @@ def leer_tabla(nombre, contenido):
     # Se guarda el número de fila real (el que ves en Excel) aunque haya filas en blanco.
     filas = [(n, f) for n, f in enumerate(filas, start=1)
              if f and any(c not in (None, "") and str(c).strip() for c in f)]
+    if len(filas) > 50000:   # límite de filas por tabla (F-10)
+        return [], "La tabla es demasiado grande (máximo 50.000 filas)."
     if not filas:
         return [], "No hay ninguna fila con datos."
 

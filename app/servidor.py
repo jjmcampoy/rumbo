@@ -36,6 +36,15 @@ app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False   # respeta el orden de tipos y listas al mandarlos al navegador
 cerrojo = threading.RLock()  # el motor no admite dos cálculos (ni dos escrituras) a la vez
 
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024      # 25 MB por petición
+MAX_ARCHIVOS = 50
+MAX_FILAS = 50000
+
+
+@app.errorhandler(413)
+def demasiado_grande(_e):
+    return jsonify(ok=False, errores=["El archivo es demasiado grande (máximo 25 MB)."]), 413
+
 # Hosts y orígenes permitidos. En Docker hay que añadir el nombre del NAS:
 #   RUMBO_HOSTS=rumbo.lan,127.0.0.1,localhost
 HOSTS = tuple(h.strip().lower() for h in
@@ -255,6 +264,8 @@ def api_importar_previsualizar():
         return jsonify(ok=False, errores=[AVISO_DEMO]), 403
     origen = request.form.get("origen")
     archivos = [(f.filename, f.read()) for f in request.files.getlist("archivos") if f.filename]
+    if len(archivos) > MAX_ARCHIVOS:
+        return jsonify(ok=False, errores=[f"Demasiados archivos (máximo {MAX_ARCHIVOS})."]), 400
     texto = (request.form.get("texto") or "").strip()
     with cerrojo:
         cfg = almacen.carga(os.path.join(DATOS, "cartera.json"))
