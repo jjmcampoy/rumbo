@@ -218,7 +218,10 @@ def api_actualizar():
 @app.get("/api/cartera")
 def api_cartera():
     return jsonify(modo=modo(), cartera=cartera(), tipos=motor.TIPOS, fuentes=motor.FUENTES,
-                   tiposMovimiento=almacen.TIPOS_MOV)
+                   tiposMovimiento=almacen.TIPOS_MOV,
+                   carteraActiva={"id": _cid(), "nombre": carteras.nombre(DATOS, _cid())}
+                   if modo() == "propio" else None,
+                   carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
 
 
 @app.get("/api/buscar")
@@ -308,13 +311,104 @@ def api_empezar():
     """Sale de la demo: crea tu cartera, vacía o como copia del ejemplo para practicar."""
     if modo() != "demo":
         return jsonify(ok=False, errores=["Ya tienes tu propia cartera."]), 400
+    # Alias fino del catálogo: conserva el contrato de T-31 para la UI actual.
+    desde = (request.get_json(silent=True) or {}).get("desde")
+    nombre = "Mi patrimonio (copia del ejemplo)" if desde == "ejemplo" else "Mi patrimonio"
     with cerrojo:
-        desde = (request.get_json(silent=True) or {}).get("desde")
-        nombre = "Mi patrimonio (copia del ejemplo)" if desde == "ejemplo" else "Mi patrimonio"
         info = carteras.crea(DATOS, nombre, desde=desde)
         carteras.activa_set(DATOS, info["id"])
-        recalcula(descargar="faltan")
+    recalcula(descargar="faltan")
     return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- catálogo de carteras
+
+def _cartera_meta(cid):
+    """Metadatos de una cartera (sin el documento, que puede ser grande)."""
+    return {"id": cid, "nombre": carteras.nombre(DATOS, cid),
+            "creada": next((c["creada"] for c in carteras.lista(DATOS) if c["id"] == cid), None)}
+
+
+@app.get("/api/carteras")
+def api_carteras():
+    """Lista de carteras (solo metadatos) y cuál está activa."""
+    return jsonify(carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)],
+                   activa=_cid() if modo() == "propio" else None)
+
+
+@app.post("/api/carteras")
+def api_crear_cartera():
+    """Crea una cartera: vacía, copia del ejemplo o copia de otra cartera.
+    No la activa (la UI lo pide expresamente), salvo en demo: la primera
+    cartera sale de la demo y queda activa."""
+    datos = request.get_json(silent=True) or {}
+    nombre = str(datos.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify(ok=False, errores=["Ponle un nombre a la cartera."]), 400
+    if len(nombre) > 60:
+        return jsonify(ok=False, errores=["El nombre es demasiado largo (máximo 60)."]), 400
+    desde = datos.get("desde")
+    if desde not in (None, "vacia", "ejemplo") and not carteras.id_valido(desde):
+        return jsonify(ok=False, errores=["La cartera de origen no es válida."]), 400
+    # Hay que mirar el modo ANTES de crear: crea() ya escribe el índice y deja
+    # de haber demo, así que después el modo siempre sería "propio".
+    era_demo = modo() == "demo"
+    with cerrojo:
+        info = carteras.crea(DATOS, nombre, desde=desde)
+        if era_demo:
+            # La primera cartera sale de la demo y queda activa.
+            carteras.activa_set(DATOS, info["id"])
+            recalcula(descargar="faltan")
+    return jsonify(ok=True, cartera=info,
+                   carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
+
+
+@app.post("/api/carteras/<cid>/activar")
+def api_activar_cartera(cid):
+    """Cambia la cartera activa; si su cálculo derivado está viejo, se limpia."""
+    if not carteras.id_valido(cid):
+        return jsonify(ok=False, errores=["Identificador de cartera no válido."]), 400
+    if not carteras.existe(DATOS, cid):
+        return jsonify(ok=False, errores=["Esa cartera no existe."]), 404
+    with cerrojo:
+        carteras.activa_set(DATOS, cid)
+        # Si el cálculo de la cartera nueva es anterior a su documento, se recalcula.
+        ruta_cfg = carteras.ruta(DATOS, cid)
+        ruta_calc = ruta_calculado(cid)
+        if os.path.exists(ruta_calc) and os.path.getmtime(ruta_calc) < os.path.getmtime(ruta_cfg):
+            os.remove(ruta_calc)
+    return jsonify(ok=True, activa=cid)
+
+
+@app.post("/api/carteras/<cid>/renombrar")
+def api_renombrar_cartera(cid):
+    """Cambia el nombre de una cartera (índice y titular del documento)."""
+    if not carteras.id_valido(cid):
+        return jsonify(ok=False, errores=["Identificador de cartera no válido."]), 400
+    if not carteras.existe(DATOS, cid):
+        return jsonify(ok=False, errores=["Esa cartera no existe."]), 404
+    nombre = str((request.get_json(silent=True) or {}).get("nombre") or "").strip()
+    if not nombre:
+        return jsonify(ok=False, errores=["Ponle un nombre a la cartera."]), 400
+    if len(nombre) > 60:
+        return jsonify(ok=False, errores=["El nombre es demasiado largo (máximo 60)."]), 400
+    with cerrojo:
+        carteras.renombra(DATOS, cid, nombre)
+    return jsonify(ok=True, cartera=_cartera_meta(cid))
+
+
+@app.delete("/api/carteras/<cid>")
+def api_borrar_cartera(cid):
+    """Borra una cartera: su JSON se mueve a copias/<cid>/borrada_<sello>.json."""
+    if not carteras.id_valido(cid):
+        return jsonify(ok=False, errores=["Identificador de cartera no válido."]), 400
+    if not carteras.existe(DATOS, cid):
+        return jsonify(ok=False, errores=["Esa cartera no existe."]), 404
+    if len(carteras.lista(DATOS)) <= 1:
+        return jsonify(ok=False, errores=["No se puede borrar la última cartera."]), 400
+    with cerrojo:
+        carteras.borra(DATOS, cid, ruta_copias())
+    return jsonify(ok=True, carteras=[{**c, "activa": c["id"] == _cid()} for c in carteras.lista(DATOS)])
 
 
 # ---------------------------------------------------------------- importar
