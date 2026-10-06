@@ -26,3 +26,13 @@ def test_app_js_no_interpola_texto_sin_escapar():
             # permitido si va dentro de esc( ... )
             antes = src[max(0, m.start() - 40):m.start()]
             assert "esc(" in antes, f"{pat} sin esc() en app.js:{linea}"
+
+# Mismos patrones para los graficos (leyendas y tooltips).
+PELIGROSOS_GRAF = [r"\$\{s\.nombre\b", r"\$\{d\.nombre\b"]
+
+def test_graficos_js_no_interpola_nombres_sin_escapar():
+    src = _js("graficos.js")
+    for pat in PELIGROSOS_GRAF:
+        for m in re.finditer(pat, src):
+            antes = src[max(0, m.start() - 40):m.start()]
+            assert "esc(" in antes, f"{pat} sin esc() en graficos.js"
