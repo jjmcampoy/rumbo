@@ -256,18 +256,19 @@ AVISO_DEMO = ("Estás viendo la cartera de ejemplo. Pulsa «Empezar con mis dato
               "para crear la tuya y poder guardar cambios.")
 
 
-def cambia(fn):
-    """Aplica un cambio a la cartera, la guarda (con copia automática) y recalcula."""
+def cambia(fn, cid=None):
+    """Aplica un cambio a la cartera (la activa si no se da cid), la guarda
+    (con copia automática) y recalcula."""
     if modo() == "demo":
         return jsonify(ok=False, errores=[AVISO_DEMO]), 403
     with cerrojo:
-        ruta = ruta_cartera()
+        ruta = ruta_cartera(cid)
         cfg = almacen.carga(ruta)
         try:
             item = fn(cfg)
         except almacen.ErrorValidacion as e:
             return jsonify(ok=False, errores=e.errores), 400
-        almacen.guarda(ruta, cfg, copias=ruta_copias())
+        almacen.guarda(ruta, cfg, copias=ruta_copias(cid))
         datos = recalcula(descargar="faltan")
     return jsonify(ok=True, item=item, cartera=cfg, avisos=(datos or {}).get("avisos", []))
 
@@ -459,7 +460,7 @@ def api_borrar_cartera(cid):
 
 # ---------------------------------------------------------------- importar
 
-PLANES = {}   # vista previa pendiente de confirmar: {token: plan}
+PLANES = {}   # vista previa pendiente de confirmar: {token: {"cid": cartera, "plan": plan}}
 
 
 @app.post("/api/importar/previsualizar")
@@ -491,21 +492,29 @@ def api_importar_previsualizar():
         informe = importar.vista_previa(cfg, plan)
     token = secrets.token_hex(8)
     PLANES.clear()   # solo una importación pendiente a la vez
-    PLANES[token] = plan
+    PLANES[token] = {"cid": _cid(), "plan": plan}
     return jsonify(ok=True, token=token, informe=informe)
 
 
 @app.post("/api/importar/confirmar")
 def api_importar_confirmar():
-    plan = PLANES.pop((request.get_json(silent=True) or {}).get("token"), None)
-    if plan is None:
+    entrada = request.get_json(silent=True) or {}
+    pendiente = PLANES.pop(entrada.get("token"), None)
+    if pendiente is None:
         return jsonify(ok=False, errores=["Esa vista previa ya no vale: vuelve a revisar el archivo."]), 400
+    # Si la cartera activa cambió entre la vista previa y la confirmación, el plan
+    # no vale: se rechaza sin tocar ninguna cartera. La cartera objetivo ya está
+    # guardada en el token; el cliente no tiene que repetirla.
+    if pendiente["cid"] != _cid():
+        return jsonify(ok=False,
+                       errores=["La cartera activa ha cambiado: vuelve a revisar el archivo."]), 400
+    plan = pendiente["plan"]
     informe = {}
 
     def fn(cfg):
         informe.update(importar.aplicar(cfg, plan))
         return None
-    respuesta = cambia(fn)
+    respuesta = cambia(fn, cid=pendiente["cid"])
     if isinstance(respuesta, tuple):
         return respuesta
     datos = respuesta.get_json()

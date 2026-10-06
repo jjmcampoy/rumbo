@@ -341,6 +341,85 @@ def carteras_lista(tmp_path):
     return idx["carteras"]
 
 
+def _texto_importar(pid):
+    """Texto pegado con una compra de un producto ya existente."""
+    return ("fecha;tipo_movimiento;identificador;importe;unidades\n"
+            f"2024-01-05;compra;{pid};500;5\n"
+            f"2024-01-06;compra;{pid};700;7")
+
+
+def test_confirmar_importacion_en_otra_cartera(cliente, entorno):
+    """Confirmar con la cartera activa cambiada: 400 y ninguna cartera se toca."""
+    servidor, tmp_path = entorno
+    a, b = _dos_carteras(tmp_path)
+    r = cliente.post("/api/importar/previsualizar",
+                     data={"texto": _texto_importar("accion")}, headers=CAB)
+    assert r.status_code == 200
+    token = r.get_json()["token"]
+    # Se activa la cartera B entre la vista previa y la confirmación.
+    r = cliente.post("/api/carteras/b/activar", headers=CAB)
+    assert r.status_code == 200
+    r = cliente.post("/api/importar/confirmar",
+                     json={"token": token, "cid": "a"}, headers=CAB)
+    assert r.status_code == 400
+    assert r.get_json()["errores"] == ["La cartera activa ha cambiado: vuelve a revisar el archivo."]
+    # Ni A ni B han cambiado.
+    a2 = json.load(open(os.path.join(tmp_path, "carteras", "a.json"), encoding="utf-8"))
+    b2 = json.load(open(os.path.join(tmp_path, "carteras", "b.json"), encoding="utf-8"))
+    assert a2 == a and b2 == b
+    # El token se consume: confirmar otra vez tampoco vale.
+    r = cliente.post("/api/importar/confirmar", json={"token": token, "cid": "b"}, headers=CAB)
+    assert r.status_code == 400
+
+
+def test_confirmar_importacion_en_la_misma_cartera(cliente, entorno, monkeypatch):
+    """Confirmar sin cambiar de cartera: los movimientos caen solo en esa cartera."""
+    servidor, tmp_path = entorno
+    _cache_sembrada(monkeypatch, tmp_path, ["AAA"])
+    a, b = _dos_carteras(tmp_path)
+    r = cliente.post("/api/importar/previsualizar",
+                     data={"texto": _texto_importar("AAA")}, headers=CAB)
+    assert r.status_code == 200
+    token = r.get_json()["token"]
+    # La vista previa de verdad produce las dos filas, sin errores.
+    informe = r.get_json()["informe"]
+    assert informe["añadidos"] == 2
+    assert not informe["errores"]
+    r = cliente.post("/api/importar/confirmar", json={"token": token, "cid": "a"}, headers=CAB)
+    assert r.status_code == 200
+    cuerpo = r.get_json()
+    assert cuerpo["ok"]
+    a2 = json.load(open(os.path.join(tmp_path, "carteras", "a.json"), encoding="utf-8"))
+    b2 = json.load(open(os.path.join(tmp_path, "carteras", "b.json"), encoding="utf-8"))
+    # Los movimientos importados (2024-01-05 y 2024-01-06) quedan solo en A.
+    fechas_a = {m["fecha"] for m in a2["movimientos"]}
+    assert {"2024-01-05", "2024-01-06"} <= fechas_a
+    assert b2 == b
+
+
+def test_confirmar_importacion_sin_cid(cliente, entorno, monkeypatch):
+    """Confirmar mandando solo el token (como hace la interfaz): funciona si la
+    cartera activa no cambió, y los movimientos caen en la cartera del token."""
+    servidor, tmp_path = entorno
+    _cache_sembrada(monkeypatch, tmp_path, ["AAA"])
+    a, b = _dos_carteras(tmp_path)
+    r = cliente.post("/api/importar/previsualizar",
+                     data={"texto": _texto_importar("AAA")}, headers=CAB)
+    assert r.status_code == 200
+    token = r.get_json()["token"]
+    # La interfaz manda solo el token, sin repetir la cartera.
+    r = cliente.post("/api/importar/confirmar", json={"token": token}, headers=CAB)
+    assert r.status_code == 200
+    cuerpo = r.get_json()
+    assert cuerpo["ok"]
+    a2 = json.load(open(os.path.join(tmp_path, "carteras", "a.json"), encoding="utf-8"))
+    b2 = json.load(open(os.path.join(tmp_path, "carteras", "b.json"), encoding="utf-8"))
+    # Los movimientos importados quedan solo en A.
+    fechas_a = {m["fecha"] for m in a2["movimientos"]}
+    assert {"2024-01-05", "2024-01-06"} <= fechas_a
+    assert b2 == b
+
+
 def test_crear_en_demo_sale_de_la_demo(cliente, entorno):
     """Crear la primera cartera en modo demo la activa y sale de la demo."""
     servidor, tmp_path = entorno
