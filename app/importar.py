@@ -639,6 +639,7 @@ def aplicar(cfg, plan):
         "productosNuevos": [{**n["datos"], "id": ids.get(n["ref"]), "precio": n["precio"],
                              "monedaPrecio": n["monedaPrecio"], "fechaPrecio": n["fecha"],
                              "mercado": n["mercado"]} for n in plan.productos_nuevos],
+        "reconciliacion": list(getattr(plan, "reconciliacion", [])),
         "filas": sorted(filas, key=lambda f: f["fecha"], reverse=True),
     }
 
