@@ -571,12 +571,13 @@ def serie_cambio(moneda, carpeta):
 
 # ---------------------------------------------------------------- construccion
 
-def construir(cfg, carpeta, descargar=True):
+def construir(cfg, carpeta, descargar=True, historico=None):
     """
     Calcula todo lo que pinta el panel a partir de la cartera (productos, movimientos
     y valoraciones) y devuelve el diccionario DATOS. Con descargar=False no sale a
     internet: recalcula con los precios guardados en la cache. Con descargar="faltan"
-    solo descarga los precios de productos nuevos.
+    solo descarga los precios de productos nuevos. Con historico=ruta, el histórico
+    se guarda en esa ruta (por defecto carpeta/historico.json).
     """
     global CACHE, SIN_RED, SOLO_FALTAN
     CACHE = os.path.join(carpeta, "cache")
@@ -1292,13 +1293,14 @@ def construir(cfg, carpeta, descargar=True):
             p.pop(k)
 
     # historico: un resumen por cada fecha calculada, para no perder el rastro
-    hist_ruta = os.path.join(carpeta, "historico.json")
+    hist_ruta = historico or os.path.join(carpeta, "historico.json")
     hist = lee_cache(hist_ruta) or []
     hist = [h for h in hist if h.get("fecha") != fecha_extracto.isoformat()]
     hist.append({"fecha": fecha_extracto.isoformat(), "patrimonio": patrimonio,
                  "aportado": aportado_total, "plusvalia": plusvalia_total,
                  "porProducto": {p["id"]: p["valor"] for p in productos}})
     hist.sort(key=lambda h: h["fecha"])
+    os.makedirs(os.path.dirname(hist_ruta), exist_ok=True)
     with open(hist_ruta, "w", encoding="utf-8") as f:
         json.dump(hist, f, ensure_ascii=False, indent=1)
 

@@ -22,7 +22,7 @@ import webbrowser
 from flask import Flask, Response, jsonify, request, send_from_directory
 from werkzeug.serving import make_server
 
-from . import almacen, buscar, exportar, importar, motor, plantilla
+from . import almacen, buscar, carteras, exportar, importar, motor, plantilla
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(RAIZ, "app", "web")
@@ -30,6 +30,9 @@ WEB = os.path.join(RAIZ, "app", "web")
 DATOS = os.environ.get("PATRIMONIO_DATOS") or os.path.join(RAIZ, "mis_datos")
 DEMO = os.path.join(RAIZ, "demo", "cartera.json")
 PUERTO = int(os.environ.get("PATRIMONIO_PUERTO") or 8765)
+
+# Migración ADR-3 (idempotente): la cartera antigua pasa a mis_datos/carteras.
+carteras.migra_si_hace_falta(DATOS)
 HORAS_PRECIOS = 6          # al arrancar, se actualizan si tienen más de esto
 
 app = Flask(__name__, static_folder=None)
@@ -58,6 +61,11 @@ MAX_FILAS = 50000
 @app.errorhandler(413)
 def demasiado_grande(_e):
     return jsonify(ok=False, errores=["El archivo es demasiado grande (máximo 25 MB)."]), 413
+
+
+@app.errorhandler(carteras.ErrorCartera)
+def _error_cartera(e):
+    return jsonify(ok=False, errores=e.errores), 400
 
 # Hosts y orígenes permitidos. En Docker hay que añadir el nombre del NAS:
 #   RUMBO_HOSTS=rumbo.lan,127.0.0.1,localhost
@@ -113,21 +121,45 @@ def escribe_json(ruta, datos):
     os.chmod(ruta, 0o600)
 
 
+def _cid():
+    """El id de la cartera activa (o el defecto si no hay índice)."""
+    return carteras.activa(DATOS) or carteras.ID_DEFECTO
+
+
+def ruta_cartera(cid=None):
+    return carteras.ruta(DATOS, cid or _cid())
+
+
+def ruta_copias(cid=None):
+    return os.path.join(DATOS, "copias", cid or _cid())
+
+
+def ruta_calculado(cid=None):
+    return os.path.join(DATOS, "calculado", (cid or _cid()) + ".json")
+
+
+def ruta_estado(cid=None):
+    return os.path.join(DATOS, "estado", (cid or _cid()) + ".json")
+
+
+def ruta_historico(cid=None):
+    return os.path.join(DATOS, "historico", (cid or _cid()) + ".json")
+
+
 def modo():
-    """'propio' si ya hay una cartera en mis_datos; si no, 'demo'."""
-    return "propio" if os.path.exists(os.path.join(DATOS, "cartera.json")) else "demo"
+    """'propio' si ya hay alguna cartera en mis_datos; si no, 'demo'."""
+    return "propio" if carteras.lista(DATOS) else "demo"
 
 
-def cartera():
-    return lee_json(os.path.join(DATOS, "cartera.json") if modo() == "propio" else DEMO, {})
-
-
-def ruta_calculado():
-    return os.path.join(DATOS, f"calculado_{modo()}.json")
+def cartera(cid=None):
+    """El documento de la cartera activa; {} si no existe (nunca lanza)."""
+    if modo() == "demo":
+        return lee_json(DEMO, {})
+    return lee_json(ruta_cartera(cid), {})
 
 
 def estado():
-    return lee_json(os.path.join(DATOS, "estado.json"), {})
+    return lee_json(ruta_estado(), {})
 
 
 # ---------------------------------------------------------------- cálculo
@@ -136,11 +168,12 @@ def recalcula(descargar):
     """Recalcula el panel. Con descargar=True baja antes los precios nuevos;
     con "faltan", solo los de productos que aún no tienen precios guardados."""
     with cerrojo:
-        datos = motor.construir(cartera(), DATOS, descargar=descargar)
+        datos = motor.construir(cartera(), DATOS, descargar=descargar,
+                                historico=ruta_historico())
         est = estado()
         if descargar is True:
             est["preciosActualizados"] = dt.datetime.now().replace(microsecond=0).isoformat()
-            escribe_json(os.path.join(DATOS, "estado.json"), est)
+            escribe_json(ruta_estado(), est)
         if datos is not None:
             datos["modo"] = modo()
             datos["preciosActualizados"] = est.get("preciosActualizados")
@@ -225,13 +258,13 @@ def cambia(fn):
     if modo() == "demo":
         return jsonify(ok=False, errores=[AVISO_DEMO]), 403
     with cerrojo:
-        ruta = os.path.join(DATOS, "cartera.json")
+        ruta = ruta_cartera()
         cfg = almacen.carga(ruta)
         try:
             item = fn(cfg)
         except almacen.ErrorValidacion as e:
             return jsonify(ok=False, errores=e.errores), 400
-        almacen.guarda(ruta, cfg)
+        almacen.guarda(ruta, cfg, copias=ruta_copias())
         datos = recalcula(descargar="faltan")
     return jsonify(ok=True, item=item, cartera=cfg, avisos=(datos or {}).get("avisos", []))
 
@@ -276,11 +309,10 @@ def api_empezar():
     if modo() != "demo":
         return jsonify(ok=False, errores=["Ya tienes tu propia cartera."]), 400
     with cerrojo:
-        if (request.get_json(silent=True) or {}).get("desde") == "ejemplo":
-            cfg = dict(lee_json(DEMO, {}), titular="Mi patrimonio (copia del ejemplo)")
-        else:
-            cfg = json.loads(json.dumps(almacen.CARTERA_VACIA))
-        almacen.guarda(os.path.join(DATOS, "cartera.json"), cfg)
+        desde = (request.get_json(silent=True) or {}).get("desde")
+        nombre = "Mi patrimonio (copia del ejemplo)" if desde == "ejemplo" else "Mi patrimonio"
+        info = carteras.crea(DATOS, nombre, desde=desde)
+        carteras.activa_set(DATOS, info["id"])
         recalcula(descargar="faltan")
     return jsonify(ok=True)
 
@@ -301,7 +333,7 @@ def api_importar_previsualizar():
         return jsonify(ok=False, errores=[f"Demasiados archivos (máximo {MAX_ARCHIVOS})."]), 400
     texto = (request.form.get("texto") or "").strip()
     with cerrojo:
-        cfg = almacen.carga(os.path.join(DATOS, "cartera.json"))
+        cfg = almacen.carga(ruta_cartera())
         if origen == "myinvestor":
             if not archivos:
                 return jsonify(ok=False, errores=["Elige los archivos CSV que has descargado de MyInvestor."]), 400
@@ -361,10 +393,6 @@ def api_prompt():
 
 # ---------------------------------------------------------------- copias de seguridad
 
-def ruta_copias():
-    return os.path.join(DATOS, "copias")
-
-
 def valida_copia(cfg):
     """Comprueba que un JSON tiene pinta de cartera de esta app."""
     errores = almacen.valida_cartera(cfg)
@@ -376,10 +404,10 @@ def valida_copia(cfg):
 def restaura(cfg):
     """Pone cfg como cartera. Lo que hubiera antes queda en las copias automáticas."""
     with cerrojo:
-        almacen.guarda(os.path.join(DATOS, "cartera.json"), cfg)
-        for viejo in ("calculado_propio.json", "historico.json"):
-            if os.path.exists(os.path.join(DATOS, viejo)):
-                os.remove(os.path.join(DATOS, viejo))
+        almacen.guarda(ruta_cartera(), cfg, copias=ruta_copias())
+        for viejo in (ruta_calculado(), ruta_historico()):
+            if os.path.exists(viejo):
+                os.remove(viejo)
         recalcula(descargar="faltan")
 
 
@@ -407,7 +435,7 @@ def api_copias():
 def api_copia_descargar():
     if modo() != "propio":
         return jsonify(ok=False, errores=["Todavía no tienes una cartera propia que guardar."]), 400
-    with open(os.path.join(DATOS, "cartera.json"), "rb") as f:
+    with open(ruta_cartera(), "rb") as f:
         contenido = f.read()
     nombre = f"copia_patrimonio_{dt.date.today().isoformat()}.json"
     return Response(contenido, mimetype="application/json",
@@ -443,7 +471,7 @@ def api_copia_recuperar():
     if modo() == "propio":
         # Además de la copia automática, una con nombre propio que no se borra sola.
         sello = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        with open(os.path.join(DATOS, "cartera.json"), "rb") as a, \
+        with open(ruta_cartera(), "rb") as a, \
                 open(os.path.join(ruta_copias(), f"antes_de_recuperar_{sello}.json"), "wb") as b:
             b.write(a.read())
     restaura(cfg)
@@ -497,16 +525,16 @@ def api_reiniciar():
         return jsonify(ok=False, errores=["Ahora mismo no tienes ninguna cartera propia."]), 400
     a = (request.get_json(silent=True) or {}).get("a")
     with cerrojo:
-        ruta = os.path.join(DATOS, "cartera.json")
-        copias = os.path.join(DATOS, "copias")
+        ruta = ruta_cartera()
+        copias = ruta_copias()
         os.makedirs(copias, exist_ok=True)
         sello = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         os.replace(ruta, os.path.join(copias, f"antes_de_reiniciar_{sello}.json"))
-        for viejo in ("calculado_propio.json", "historico.json"):
-            if os.path.exists(os.path.join(DATOS, viejo)):
-                os.remove(os.path.join(DATOS, viejo))
+        for viejo in (ruta_calculado(), ruta_historico()):
+            if os.path.exists(viejo):
+                os.remove(viejo)
         if a == "vacia":
-            almacen.guarda(ruta, json.loads(json.dumps(almacen.CARTERA_VACIA)))
+            almacen.guarda(ruta, json.loads(json.dumps(almacen.CARTERA_VACIA)), copias=copias)
         recalcula(descargar="faltan")
     return jsonify(ok=True)
 
