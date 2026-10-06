@@ -15,6 +15,7 @@ import re
 import secrets
 import sys
 import threading
+import urllib.parse
 import urllib.request
 import webbrowser
 
@@ -34,6 +35,38 @@ HORAS_PRECIOS = 6          # al arrancar, se actualizan si tienen más de esto
 app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False   # respeta el orden de tipos y listas al mandarlos al navegador
 cerrojo = threading.RLock()  # el motor no admite dos cálculos (ni dos escrituras) a la vez
+
+# Hosts y orígenes permitidos. En Docker hay que añadir el nombre del NAS:
+#   RUMBO_HOSTS=rumbo.lan,127.0.0.1,localhost
+HOSTS = tuple(h.strip().lower() for h in
+              (os.environ.get("RUMBO_HOSTS") or "127.0.0.1,localhost").split(",") if h.strip())
+CABECERA_ANTICSRF = "X-Rumbo"
+MUTANTES = ("POST", "PUT", "PATCH", "DELETE")
+
+def _host_de(valor):
+    """'rumbo.lan:8765' -> 'rumbo.lan'; '[::1]:8765' -> '::1'."""
+    v = (valor or "").strip().lower()
+    if v.startswith("["):
+        return v[1:].split("]")[0]
+    return v.split(":")[0]
+
+@app.before_request
+def guardia_peticion():
+    # 1) Host permitido: evita DNS rebinding.
+    if _host_de(request.host) not in HOSTS:
+        return jsonify(ok=False, errores=["Host no permitido."]), 421
+    # 2) Peticiones de navegador de otro sitio: fuera (CSRF).
+    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        return jsonify(ok=False, errores=["Origen no permitido."]), 403
+    origen = request.headers.get("Origin")
+    if origen and _host_de(urllib.parse.urlsplit(origen).netloc) not in HOSTS:
+        return jsonify(ok=False, errores=["Origen no permitido."]), 403
+    # 3) Las rutas que escriben exigen una cabecera que un formulario cross-site
+    #    no puede poner (multipart/form-data sigue siendo "simple" para CORS).
+    if request.method in MUTANTES and request.path.startswith("/api/"):
+        if request.headers.get(CABECERA_ANTICSRF) != "1":
+            return jsonify(ok=False, errores=["Falta la cabecera %s." % CABECERA_ANTICSRF]), 403
+    return None
 
 
 # ---------------------------------------------------------------- archivos

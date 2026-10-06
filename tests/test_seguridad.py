@@ -62,3 +62,30 @@ def test_whitelist_f01():
             for m in re.finditer(pat, src):
                 antes = src[max(0, m.start() - 40):m.start()]
                 assert "esc(" in antes, f"{pat} sin esc() en {archivo} (F-01)"
+
+# ---------------------------------------------------------------- F-03/F-04/F-05
+# Guardia de host/origen y cabecera anti-CSRF en el servidor.
+
+def test_empezar_sin_cabecera_es_403(cliente):
+    r = cliente.post("/api/empezar")
+    assert r.status_code == 403
+
+def test_empezar_con_cabecera_es_200(cliente):
+    r = cliente.post("/api/empezar", headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+
+def test_get_cartera_sin_cabecera_es_200(cliente):
+    r = cliente.get("/api/cartera")
+    assert r.status_code == 200
+
+def test_post_con_origen_malo_es_403(cliente):
+    r = cliente.post("/api/empezar", headers={"X-Rumbo": "1", "Origin": "http://evil.example"})
+    assert r.status_code == 403
+
+def test_ping_con_host_malo_es_421(cliente):
+    r = cliente.get("/api/ping", headers={"Host": "evil.example"})
+    assert r.status_code == 421
+
+def test_ping_con_host_local_es_200(cliente):
+    r = cliente.get("/api/ping", headers={"Host": "127.0.0.1:8799"})
+    assert r.status_code == 200

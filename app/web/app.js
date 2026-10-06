@@ -1113,7 +1113,7 @@
     b.disabled = true;
     b.textContent = "↻ Actualizando…";
     try {
-      const r = await fetch("api/actualizar", { method: "POST" });
+      const r = await fetch("api/actualizar", { method: "POST", headers: { "X-Rumbo": "1" } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
       location.reload();

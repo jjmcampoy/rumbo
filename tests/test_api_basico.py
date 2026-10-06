@@ -6,14 +6,18 @@ que los refactores posteriores tengan una red de seguridad.
 """
 
 
+CAB = {"X-Rumbo": "1"}   # inofensivo antes de T-16, obligatorio después
+
+
 def _empezar(cliente):
     """Sale de la demo creando una cartera propia vacía."""
-    return cliente.post("/api/empezar", json={})
+    return cliente.post("/api/empezar", json={}, headers=CAB)
 
 
 def _crear_producto(cliente, nombre):
     r = cliente.post("/api/productos",
-                     json={"nombre": nombre, "tipo": "fondo", "fuente": "manual"})
+                     json={"nombre": nombre, "tipo": "fondo", "fuente": "manual"},
+                     headers=CAB)
     assert r.status_code == 200
     return r.get_json()["item"]["id"]
 
@@ -31,7 +35,8 @@ def test_sin_cartera_propia_esta_en_demo(cliente):
 
 
 def test_en_demo_no_se_puede_guardar(cliente):
-    r = cliente.post("/api/productos", json={"nombre": "Cualquiera", "tipo": "fondo"})
+    r = cliente.post("/api/productos", json={"nombre": "Cualquiera", "tipo": "fondo"},
+                     headers=CAB)
     assert r.status_code == 403
     assert r.get_json()["errores"]
 
@@ -58,10 +63,10 @@ def test_movimiento_con_fecha_futura_da_400(cliente):
     # son válidos, así que el 400 de abajo solo puede venir de la fecha futura.
     pasado = {"producto": pid, "tipo": "compra", "fecha": "2024-01-02",
               "importe": 10, "unidades": 1}
-    assert cliente.post("/api/movimientos", json=pasado).status_code == 200
+    assert cliente.post("/api/movimientos", json=pasado, headers=CAB).status_code == 200
 
     futuro = dict(pasado, fecha="2099-01-01")
-    r = cliente.post("/api/movimientos", json=futuro)
+    r = cliente.post("/api/movimientos", json=futuro, headers=CAB)
     assert r.status_code == 400
     errores = r.get_json()["errores"]
     assert errores
@@ -71,7 +76,7 @@ def test_movimiento_con_fecha_futura_da_400(cliente):
 def test_borrar_producto_lo_quita_de_la_cartera(cliente):
     _empezar(cliente)
     ident = _crear_producto(cliente, "Para borrar")
-    assert cliente.delete(f"/api/productos/{ident}").status_code == 200
+    assert cliente.delete(f"/api/productos/{ident}", headers=CAB).status_code == 200
     productos = cliente.get("/api/cartera").get_json()["cartera"]["productos"]
     assert ident not in [p["id"] for p in productos]
 
