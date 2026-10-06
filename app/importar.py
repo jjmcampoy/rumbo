@@ -499,6 +499,14 @@ def preparar_tabla(cfg, filas, carpeta):
             neto = importe - (comision or 0) if tipo == "compra" else importe + (comision or 0)
             unidades = neto / precio
             marcas.append("unidades calculadas")
+        elif tipo in ("compra", "venta") and cotiza and unidades and importe:
+            # Las unidades dadas no cuadran con el precio de ese día: se avisa,
+            # sin rechazar la fila (con comisiones de entrada puede ser legítimo).
+            precio_dia = valor_en(res.serie(ref, fecha), fecha, margen=6)
+            if precio_dia:
+                implicito = importe / unidades
+                if abs(implicito / precio_dia - 1) > 0.20:
+                    marcas.append(f"ojo: {implicito:.2f} €/unidad frente a {precio_dia:.2f} € del {fecha}")
         plan.movimientos.append({"fila": n, "producto": ref, "fecha": fecha, "tipo": tipo,
                                  "unidades": unidades, "importe": round(importe, 2),
                                  "comision": round(comision, 2) if comision else None,

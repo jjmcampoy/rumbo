@@ -395,6 +395,31 @@ def test_importar_myinvestor_dos_veces(entorno, monkeypatch):
     assert cfg == copia
 
 
+# ---------------------------------------------------------------- avisos de coherencia (I-07)
+
+def test_unidades_diez_veces_mal_se_avisa(entorno, monkeypatch):
+    """
+    Una fila de compra cuyas unidades están 10x por debajo del importe se marca
+    con un aviso de coherencia, pero la fila se importa igual: es una advertencia,
+    no un rechazo (con comisiones de entrada el desvío puede ser legítimo).
+    """
+    _, datos_dir = entorno
+    descarga_de_la_cache(datos_dir, monkeypatch)
+    cfg = cartera_fondo(datos_dir)
+    # 100 € con 0,5 unidades implican 200 €/unidad; el VL del día es 20,00.
+    filas = [(1, {"fecha": "2022-05-04", "tipo_movimiento": "compra", "identificador": ISIN,
+                  "unidades": "0,5", "importe": "100"})]
+    plan = importar.preparar_tabla(cfg, filas, str(datos_dir))
+    assert plan.errores == []
+    assert len(plan.movimientos) == 1
+    mv = plan.movimientos[0]
+    assert mv["unidades"] == 0.5
+    assert any("ojo: 200.00 €/unidad frente a 20.00 € del 2022-05-04" in m for m in mv["marcas"])
+    informe = importar.vista_previa(cfg, plan)
+    assert informe["añadidos"] == 1
+    assert any("ojo: 200.00 €/unidad" in m for f in informe["filas"] for m in f["marcas"])
+
+
 # ---------------------------------------------------------------- saldos de productos cotizados (I-05)
 
 def test_saldo_de_producto_cotizado_se_rechaza(entorno, monkeypatch):
