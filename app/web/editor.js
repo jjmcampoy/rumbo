@@ -890,8 +890,8 @@
       <section class="tarjeta"><header><h2>Nueva cartera</h2>
         <span class="subt">Empieza de cero o desde otra cartera.</span></header>
       <div class="rejilla">
-        ${campo("Nombre", '<input name="cNuevoNombre" required>')}
-        ${campo("Origen", `<select name="cNuevoDesde"><option value="vacia">Vacía</option>${desdeOpciones}
+        ${campo("Nombre", '<input id="cNuevoNombre" name="cNuevoNombre" required>')}
+        ${campo("Origen", `<select id="cNuevoDesde" name="cNuevoDesde"><option value="vacia">Vacía</option>${desdeOpciones}
           <option value="ejemplo">Copia del ejemplo</option></select>`)}
       </div>
       <p class="ayuda" style="margin:10px 0 12px">La cartera nueva se crea pero no se activa: pulsa «Activar» para cargarla.</p>
@@ -901,7 +901,7 @@
       ${activos.length ? `<p class="ayuda">Selecciona los productos de <b>${esc(E.cfg.titular || "tu cartera")}</b>:</p>
         <div class="extraerList">${opcionesProd}</div>
         <div class="rejilla">
-          ${campo("Cartera de destino", '<input name="cExtraerNombre" required>')}
+          ${campo("Cartera de destino", '<input id="cExtraerNombre" name="cExtraerNombre" required>')}
           <label class="campo"><span class="et">Modo</span>
             <label class="radioFila"><input type="radio" name="cExtraerModo" value="copiar" checked> Copiar</label>
             <label class="radioFila"><input type="radio" name="cExtraerModo" value="mover"> Mover (los quita de aquí)</label></label>

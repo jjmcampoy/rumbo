@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Guardias baratas de la UI multi‑cartera (T-34), sin navegador."""
 import os
+import re
 
 WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "app", "web")
@@ -28,3 +29,22 @@ def test_contenedor_grafico_comparar():
     # (.gtt) va en position:absolute y solo se ancla con .envGraf{position:relative}
     editor = open(os.path.join(WEB, "editor.js"), encoding="utf-8").read()
     assert 'id="grafComparar" class="envGraf"' in editor
+
+
+def test_selectores_con_elemento():
+    """Cada `$("#id")` del editor tiene que tener su `id="…"` en algún sitio.
+
+    T-34 dejó los tres campos del formulario de carteras con `name=` pero sin
+    `id=`, así que sus handlers leían cadena vacía: el formulario pedía el
+    nombre aunque estuviera escrito, y el selector de origen se ignoraba
+    (creaba una cartera vacía). El fallo era invisible para el resto de la
+    suite, que llama a la API directamente.
+    """
+    editor = open(os.path.join(WEB, "editor.js"), encoding="utf-8").read()
+    todos = editor
+    for fichero in ("index.html", "app.js"):
+        todos += open(os.path.join(WEB, fichero), encoding="utf-8").read()
+    declarados = set(re.findall(r'id="([A-Za-z0-9_-]+)"', todos))
+    usados = set(re.findall(r"""\$\(\s*["']#([A-Za-z0-9_-]+)["']""", editor))
+    faltan = sorted(usados - declarados)
+    assert not faltan, "selectores sin elemento: %s" % faltan
