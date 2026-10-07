@@ -42,6 +42,17 @@ def test_pagina_incluye_icono_base64():
     assert "data:image/png;base64" in html
 
 
+def test_nombre_cartera_no_inyecta_html():
+    # Un nombre de cartera malicioso no debe aparecer sin escapar (F-02).
+    malicio = 'P"><script>alert(1)</script>'
+    html = exportar.pagina(WEB, DATOS_MINIMOS, titulo=malicio)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    # Un nombre normal sigue apareciendo tal cual.
+    html = exportar.pagina(WEB, DATOS_MINIMOS, titulo="Mi cartera")
+    assert 'content="Mi cartera · Rumbo"' in html
+
+
 def test_pagina_sin_cargador_lanza_error(tmp_path):
     web = tmp_path / "web"
     web.mkdir()

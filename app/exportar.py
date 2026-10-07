@@ -14,6 +14,7 @@ porcentajes), nunca tu patrimonio real.
 
 import base64
 import datetime as dt
+import html as html_mod
 import json
 import os
 import random
@@ -80,6 +81,9 @@ def pagina(web, datos, ocultar=False, titulo="Mi patrimonio"):
     def lee(nombre):
         with open(os.path.join(web, nombre), encoding="utf-8") as f:
             return f.read()
+
+    # Escapamos el nombre antes de mezclarlo en el HTML (F-02).
+    titulo = html_mod.escape(titulo, quote=True)
 
     if ocultar:
         datos = sin_importes(datos)
