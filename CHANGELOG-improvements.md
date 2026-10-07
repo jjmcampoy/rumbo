@@ -29,7 +29,8 @@ Resumen de las mejoras añadidas después de la versión 1.1, escrito para el us
 - Al crear una cartera o al extraer productos, el formulario pedía el nombre aunque lo hubieras escrito: los campos se dibujaban con `name` pero el código los buscaba por `id`, así que leía siempre un valor vacío.
 - El selector «Origen» (vacía / copia de otra cartera / copia del ejemplo) se ignoraba por el mismo motivo y creaba una cartera vacía.
 - Arreglado: los campos ya llevan su `id`, y un test comprueba que cada `$("#id")` del editor tiene su elemento, para que no vuelva a pasar.
-- Los selectores segmentados («Distribución», «Rango», «Vista») ya dejan ver con claridad la opción elegida: antes, la pill activa se pintaba con el propio color de la tarjeta y parecía hueco, así que no había forma de saber qué opción estaba activa.
+- Los selectores segmentados («Distribución», «Rango», «Vista», la tabla y la serie) ahora marcan claramente la opción elegida y siguen al clic: antes el resaltado se quedaba en la opción con la que se había cargado la pestaña —y la opción activa se pintaba además con el propio color de la tarjeta, así que parecía un hueco— y no había forma de saber qué estaba seleccionado.
+- El anillo de «Distribución» vuelve a dibujarse cuando solo hay un valor (un producto, o un único grupo/entidad/tipo): antes el centro mostraba el total pero el anillo salía vacío.
 
 ## Interno (tests)
 
