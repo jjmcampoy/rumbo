@@ -24,11 +24,12 @@ Resumen de las mejoras añadidas después de la versión 1.1, escrito para el us
 - **Si importaste con una versión anterior, importa de nuevo cada fondo una vez**: así se corrigen las participaciones antiguas y cualquier venta fantasma.
 - Los totales de la vista previa de importación y la asignación de la tarjeta de importación a su cartera están corregidos.
 
-## Corregido: formularios de cartera
+## Corregido: interfaz
 
 - Al crear una cartera o al extraer productos, el formulario pedía el nombre aunque lo hubieras escrito: los campos se dibujaban con `name` pero el código los buscaba por `id`, así que leía siempre un valor vacío.
 - El selector «Origen» (vacía / copia de otra cartera / copia del ejemplo) se ignoraba por el mismo motivo y creaba una cartera vacía.
 - Arreglado: los campos ya llevan su `id`, y un test comprueba que cada `$("#id")` del editor tiene su elemento, para que no vuelva a pasar.
+- Los selectores segmentados («Distribución», «Rango», «Vista») ya dejan ver con claridad la opción elegida: antes, la pill activa se pintaba con el propio color de la tarjeta y parecía hueco, así que no había forma de saber qué opción estaba activa.
 
 ## Interno (tests)
 

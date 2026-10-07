@@ -48,3 +48,20 @@ def test_selectores_con_elemento():
     usados = set(re.findall(r"""\$\(\s*["']#([A-Za-z0-9_-]+)["']""", editor))
     faltan = sorted(usados - declarados)
     assert not faltan, "selectores sin elemento: %s" % faltan
+
+
+def test_pill_activa_distinta_de_la_tarjeta():
+    """La pill activa de `.segm` no debe pintarse con el color de la tarjeta.
+
+    El fondo de la tarjeta es `--sup`; si el botón seleccionado usa el mismo
+    token, la opción activa luce igual que la tarjeta de fondo y parece un
+    hueco vacío (y las no seleccionadas parecen las rellenas). La regla debe
+    usar otro tono (por ejemplo `--sup3`) para que quede claro cuál está activo.
+    """
+    html = open(os.path.join(WEB, "index.html"), encoding="utf-8").read()
+    regla = re.search(r"""\.segm button\[aria-pressed="true"\]\{[^}]*\}""", html)
+    assert regla, "no se encuentra la regla de la pill activa"
+    tok = re.search(r"background:\s*var\((--[a-z0-9]+)\)", regla.group(0))
+    assert tok, "la regla de la pill activa no declara background:var(--…)"
+    assert tok.group(1) != "--sup", (
+        "la opción seleccionada se pinta con el color de la tarjeta (--sup)")
