@@ -232,7 +232,7 @@
         : E.cfg.movimientos.filter(m => m.producto === p.id).length + " movs.";
       return `<tr><td><i class="pt" style="background:var(--s${p.slot || 1})"></i>${esc(nombre(p))}
           ${p.identificador ? `<small class="idp">${esc(p.identificador)}</small>` : ""}</td>
-        <td>${esc(E.tipos[p.tipo] || p.tipo)}</td><td>${precioDe(p)}</td>
+        <td>${esc(E.tipos[p.tipo] || p.tipo)}</td><td>${esc(p.grupo || "—")}</td><td>${precioDe(p)}</td>
         <td>${esc(E.fuentes[p.fuente] || "")}${p.codigo ? ` <small>${esc(p.codigo)}</small>` : ""}</td>
         <td>${n}</td>
         <td class="acc"><button data-acc="editarProducto" data-id="${esc(p.id)}">Editar</button>
@@ -242,7 +242,7 @@
         <span class="subt">Todo lo que tienes: fondos, acciones, cripto, cuentas, planes, inmuebles…</span>
         <span class="sp"></span>${E.cfg.productos.length > 1 ? '<button class="btn" data-acc="repartirColores" title="Da a cada producto un color distinto">Repartir colores</button>' : ""}
         <button class="btn prim" data-acc="nuevoProducto">+ Añadir producto</button></header>
-      ${filas ? `<div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Tipo</th><th>Último precio</th>
+      ${filas ? `<div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Tipo</th><th>Grupo</th><th>Último precio</th>
         <th>Fuente del precio</th><th>Datos</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
         : '<p class="subt">Todavía no has añadido ningún producto.</p>'}</section>`;
   }
@@ -267,6 +267,7 @@
     const nuevo = !p;
     p = p || { tipo: "fondo", fuente: "morningstar", moneda: "EUR", largoPlazo: true, slot: siguienteColor() };
     const clases = [...new Set(E.cfg.productos.map(x => x.clase).filter(Boolean))];
+    const grupos = [...new Set(E.cfg.productos.map(x => x.grupo).filter(Boolean))];
     const colores = Array.from({ length: 12 }, (_, i) =>
       `<label class="color" style="--c:var(--s${i + 1})" title="Color ${i + 1}"><input type="radio" name="slot" value="${i + 1}"><i></i></label>`).join("");
     const f = abreModal(nuevo ? "Añadir producto" : "Editar " + esc(nombre(p)), `
@@ -300,6 +301,9 @@
       <div class="rejilla">
         ${campo("Clase de activo", `<input name="clase" list="edClases" placeholder="Renta variable global">
           <datalist id="edClases">${clases.map(c => `<option value="${esc(c)}">`).join("")}</datalist>`, "opcional")}
+        ${campo("Grupo", `<input name="grupo" maxlength="40" list="edGrupos" placeholder="Familia, Cripto…">
+          <datalist id="edGrupos">${grupos.map(g => `<option value="${esc(g)}">`).join("")}</datalist>`,
+          "opcional, para comparar trozos de tu cartera")}
         ${campo("Color en los gráficos", `<div class="colores">${colores}</div>`)}
         <label class="interruptor ancho"><input type="checkbox" name="largoPlazo"><span class="pista"></span>
           <span><b>Inversión a largo plazo</b><small>El botón «Solo largo plazo» del panel quita lo que no lo es: colchón, cuentas…</small></span></label>

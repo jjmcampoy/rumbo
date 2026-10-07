@@ -190,13 +190,14 @@ def texto(v, maximo=200):
 # ---------------------------------------------------------------- productos
 
 CAMPOS_TEXTO = ("nombre", "corto", "identificador", "codigo", "entidad", "clase", "gestora",
-                "tipoDetalle", "respaldo", "respaldoMoneda", "vivo", "papel")
+                "tipoDetalle", "respaldo", "respaldoMoneda", "vivo", "papel", "grupo")
 
 
 def guarda_producto(cfg, datos):
     """Crea o actualiza un producto. Devuelve (producto, cambió_la_fuente)."""
     errores = []
-    nuevo = {k: texto(datos.get(k), 400 if k == "papel" else 200) for k in CAMPOS_TEXTO}
+    nuevo = {k: texto(datos.get(k), {"papel": 400, "grupo": 40}.get(k, 200))
+             for k in CAMPOS_TEXTO}
     if not nuevo["nombre"]:
         errores.append("Ponle un nombre al producto.")
     tipo = datos.get("tipo")

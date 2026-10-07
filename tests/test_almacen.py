@@ -94,3 +94,26 @@ def test_guarda_valoracion_sustituye_mismo_producto_y_fecha():
     almacen.guarda_valoracion(cfg, {"producto": pid, "fecha": "2024-01-02", "valor": 1200})
     assert len(cfg["valoraciones"]) == 1
     assert cfg["valoraciones"][0]["valor"] == 1200
+
+
+def test_guarda_producto_admite_grupo_opcional():
+    # El grupo es una etiqueta libre para comparar trozos de una misma cartera.
+    prod, _ = almacen.guarda_producto(_cfg(), dict(PRODUCTO, grupo="Familia"))
+    assert prod["grupo"] == "Familia"
+
+
+def test_producto_sin_grupo_no_guarda_el_campo():
+    prod, _ = almacen.guarda_producto(_cfg(), PRODUCTO)
+    assert "grupo" not in prod
+
+
+def test_grupo_vacio_quita_el_campo():
+    cfg, pid = _con_producto(dict(PRODUCTO, grupo="Familia"))
+    prod, _ = almacen.guarda_producto(cfg, {**PRODUCTO, "id": pid, "grupo": ""})
+    assert "grupo" not in prod
+    assert "grupo" not in cfg["productos"][0]
+
+
+def test_grupo_se_recorta_a_cuarenta_caracteres():
+    prod, _ = almacen.guarda_producto(_cfg(), dict(PRODUCTO, grupo="x" * 60))
+    assert prod["grupo"] == "x" * 40

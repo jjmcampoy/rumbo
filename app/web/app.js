@@ -634,7 +634,7 @@
     ], estado.vista, id => { estado.vista = id; pintaPatrimonio(); });
     pintaSegm($("#segDist"), [
       { id: "clase", et: "Activo" }, { id: "producto", et: "Producto" },
-      { id: "entidad", et: "Entidad" }, { id: "tipo", et: "Tipo" }
+      { id: "entidad", et: "Entidad" }, { id: "tipo", et: "Tipo" }, { id: "grupo", et: "Grupo" }
     ], estado.dist, id => { estado.dist = id; pintaDistribucion(); });
     pintaSegm($("#segTabla"), [{ id: "todos", et: "Todos" }].concat(
       D.productos.filter(p => (p.aportaciones || []).some(a => a.importe))
@@ -1031,6 +1031,45 @@
            <td>${G.fmtEur(c.base, 0)}</td><td>${G.fmtEur(c.anual)}</td>
            <td>${G.fmtEur(c.anual / 12)}</td></tr></tfoot>`;
     }
+
+    pintaGrupos();
+  }
+
+  /* Comparativa por grupos: trocea la cartera con la etiqueta «Grupo» de cada
+     producto sin separar los datos; el total de la cartera no cambia. */
+  function pintaGrupos() {
+    const grupos = (D.total && D.total.porGrupo) || [];
+    let sec = $("#seccionGrupos");
+    if (!sec) {
+      sec = document.createElement("section");
+      sec.className = "tarjeta";
+      sec.id = "seccionGrupos";
+      sec.innerHTML = `<header><h2>Comparativa por grupos</h2>
+        <span class="subt">Ponle a cada producto su «Grupo» y compara trozos de tu cartera: el total de
+        arriba sigue siendo el mismo.</span></header>
+        <div class="tablaEnv"><table class="dt" id="tablaGrupos"></table></div>`;
+      $("#tab-rendimiento").appendChild(sec);
+    }
+    sec.hidden = !grupos.length;
+    if (!grupos.length) return;
+    const t = D.total;
+    const dinero = v => (v == null ? "—" : G.fmtEurSigno(v));
+    const pct = v => (v == null ? "—" : G.fmtPctSigno(v, 1));
+    $("#tablaGrupos").innerHTML =
+      `<thead><tr><th>Grupo</th><th>Valor</th><th>Aportado</th><th>Plusvalía</th>
+        <th>Rentabilidad</th><th>TIR</th></tr></thead>
+       <tbody>${grupos.map(g => `<tr>
+          <td><i class="pt" style="background:${temaOscuro() ? g.color[1] : g.color[0]}"></i>${esc(g.nombre)}</td>
+          <td>${G.fmtEur(g.valor)}</td>
+          <td>${g.aportado == null ? "—" : G.fmtEur(g.aportado)}</td>
+          <td class="${(g.plusvalia || 0) >= 0 ? "pos" : "neg"}">${dinero(g.plusvalia)}</td>
+          <td class="${(g.rentabilidad || 0) >= 0 ? "pos" : "neg"}">${pct(g.rentabilidad)}</td>
+          <td>${pct(g.tir)}</td></tr>`).join("")}</tbody>
+       <tfoot><tr><td>Total</td><td>${G.fmtEur(t.patrimonio)}</td>
+          <td>${t.aportado == null ? "—" : G.fmtEur(t.aportado)}</td>
+          <td class="${(t.plusvalia || 0) >= 0 ? "pos" : "neg"}">${dinero(t.plusvalia)}</td>
+          <td class="${(t.rentabilidad || 0) >= 0 ? "pos" : "neg"}">${pct(t.rentabilidad)}</td>
+          <td>${pct(t.tir)}</td></tr></tfoot>`;
   }
 
   /* ---------------------------------------------- avisos y pie */
