@@ -212,6 +212,74 @@ def nuevo_id(datos, nombre):
     return cand
 
 
+def extrae(datos, origen_cid, nombre, ids, mover=False):
+    """Crea una cartera nueva con los productos `ids` (y sus movimientos y valores).
+
+    Con `mover=True` los quita también del origen. Primero se persiste la
+    cartera nueva (y se añade al índice) y solo después se toca el origen,
+    para que un corte nunca deje la selección sin su copia. Devuelve
+    (nueva, origen_actualizado).
+    """
+    if not id_valido(origen_cid) or not existe(datos, origen_cid):
+        raise ErrorCartera([f"La cartera de origen «{origen_cid}» no existe."])
+    nombre = (nombre or "").strip()[:60]
+    if not nombre:
+        raise ErrorCartera(["Ponle un nombre a la cartera."])
+    if not isinstance(ids, list) or not ids:
+        raise ErrorCartera(["Selecciona al menos un producto para extraer."])
+    origen = _lee_json(ruta(datos, origen_cid))
+    if not isinstance(origen, dict):
+        raise ErrorCartera([f"La cartera «{origen_cid}» no se puede leer."])
+    pids = {p.get("id") for p in origen.get("productos", []) if isinstance(p, dict)}
+    errores = [f"El producto «{i}» no está en la cartera de origen."
+               for i in ids if i not in pids]
+    if errores:
+        raise ErrorCartera(errores)
+    seleccion = list(dict.fromkeys(ids))      # sin repetir, en el orden dado
+    vivos = set(seleccion)
+
+    nueva = _copia_profunda(almacen.CARTERA_VACIA)
+    nueva["titular"] = nombre
+    nueva["productos"] = [_copia_profunda(p) for p in origen.get("productos", [])
+                          if isinstance(p, dict) and p.get("id") in vivos]
+    nueva["movimientos"] = [_copia_profunda(m) for m in origen.get("movimientos", [])
+                           if m.get("producto") in vivos]
+    nueva["valoraciones"] = [_copia_profunda(v) for v in origen.get("valoraciones", [])
+                            if v.get("producto") in vivos]
+    nueva["hitos"] = _copia_profunda(origen.get("hitos") or [])
+    nueva["objetivo"] = _copia_profunda(origen.get("objetivo") or almacen.CARTERA_VACIA["objetivo"])
+    # El comparador se recorta a los productos nuevos: si un peso queda vacío,
+    # la entrada se tira, como en almacen.borra_producto.
+    comparador = []
+    for c in origen.get("comparador", []):
+        if not isinstance(c, dict):
+            continue
+        cc = _copia_profunda(c)
+        if cc.get("pesos"):
+            cc["pesos"] = {pid: w for pid, w in cc["pesos"].items() if pid in vivos}
+        comparador.append(cc)
+    nueva["comparador"] = [c for c in comparador if c.get("real") or c.get("pesos")] \
+        or _copia_profunda(almacen.CARTERA_VACIA["comparador"])
+
+    idx = lee_indice(datos)
+    existentes = [c.get("id") for c in idx.get("carteras") or [] if isinstance(c, dict)]
+    cid = nuevo_id(datos, nombre)
+    while not id_valido(cid) or cid in existentes or existe(datos, cid):
+        cid = nuevo_id(datos, nombre)
+    # Primero se persiste la cartera nueva, y solo después se toca el origen.
+    almacen.guarda(ruta(datos, cid), nueva, copias=os.path.join(str(datos), "copias", cid))
+    idx.setdefault("version", 1)
+    idx["carteras"] = list(idx.get("carteras") or [])
+    idx["carteras"].append({"id": cid, "nombre": nombre, "creada": _ahora_iso()})
+    escribe_indice(datos, idx)
+    if mover:
+        for pid in seleccion:
+            almacen.borra_producto(origen, pid)
+        almacen.guarda(ruta(datos, origen_cid), origen,
+                       copias=os.path.join(str(datos), "copias", origen_cid))
+    return nueva, origen
+
+
 def renombra(datos, cid, nombre):
     """Cambia el nombre en el índice y el `titular` del documento."""
     if not id_valido(cid) or not existe(datos, cid):

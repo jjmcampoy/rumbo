@@ -267,3 +267,197 @@ def test_crear_en_demo_sale_de_la_demo(entorno):
     assert j["modo"] == "propio"
     assert j["carteraActiva"]["nombre"] == "La mía"
     assert j["carteras"][0]["activa"] is True
+
+
+# ---------------------------------------------------------------- extraer
+def _carta_cuatro(tmp_path, cid="origen"):
+    """Cartera `origen` con 4 productos (cada uno con un movimiento y una
+    valoración) y dos comparadores con pesos; la deja activa en el índice."""
+    def _pro(id_, nombre, corto, tipo):
+        return {"id": id_, "nombre": nombre, "corto": corto, "tipo": tipo,
+                "fuente": "manual", "codigo": "", "moneda": "EUR", "slot": 1,
+                "largoPlazo": True}
+    doc = {
+        "version": 1, "titular": "Principal",
+        "productos": [_pro("prod1", "Uno", "Uno", "fondo"),
+                      _pro("prod2", "Dos", "Dos", "etf"),
+                      _pro("prod3", "Tres", "Tres", "accion"),
+                      _pro("prod4", "Cuatro", "Cuatro", "cripto")],
+        "movimientos": [
+            {"id": "m1", "fecha": "2024-01-01", "producto": "prod1", "tipo": "compra",
+             "unidades": 1, "importe": 100.0},
+            {"id": "m2", "fecha": "2024-01-01", "producto": "prod2", "tipo": "compra",
+             "unidades": 2, "importe": 200.0},
+            {"id": "m3", "fecha": "2024-01-01", "producto": "prod3", "tipo": "compra",
+             "unidades": 3, "importe": 300.0},
+            {"id": "m4", "fecha": "2024-01-01", "producto": "prod4", "tipo": "compra",
+             "unidades": 4, "importe": 400.0}],
+        "valoraciones": [
+            {"id": "v1", "fecha": "2024-02-01", "producto": "prod1", "valor": 110.0},
+            {"id": "v2", "fecha": "2024-02-01", "producto": "prod2", "valor": 220.0},
+            {"id": "v3", "fecha": "2024-02-01", "producto": "prod3", "valor": 330.0},
+            {"id": "v4", "fecha": "2024-02-01", "producto": "prod4", "valor": 440.0}],
+        "comparador": [
+            {"id": "real", "nombre": "Mi cartera real", "real": True},
+            {"id": "cuatro25", "nombre": "Cuartos",
+             "pesos": {"prod1": 25, "prod2": 25, "prod3": 25, "prod4": 25}},
+            {"id": "tressolo", "nombre": "Solo tres", "pesos": {"prod3": 50, "prod4": 50}}],
+        "hitos": [100000],
+        "objetivo": {"activo": True, "importe": 200000, "etiqueta": "Meta"},
+    }
+    carteras.escribe_indice(tmp_path, {"version": 1, "activa": cid,
+        "carteras": [{"id": cid, "nombre": "Principal", "creada": "2024-01-01T00:00:00"}]})
+    _escribe_doc(carteras.ruta(tmp_path, cid), doc)
+    return doc
+
+
+def _doc(tmp_path, cid):
+    return json.load(open(carteras.ruta(tmp_path, cid), encoding="utf-8"))
+
+
+def _ids_carteras(tmp_path):
+    return [c["id"] for c in carteras.lee_indice(tmp_path).get("carteras", [])]
+
+
+def test_extraer_copia_deja_origen(entorno):
+    """Extraer 2 de 4 (copia) → la nueva tiene esos 2 y solo sus movimientos y
+    valoraciones; el origen queda intacto."""
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    _carta_cuatro(tmp_path)
+    original = _doc(tmp_path, "origen")
+
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "Selección", "productos": ["prod1", "prod2"],
+                           "mover": False, "desde": "origen"}, headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    nueva_id = r.get_json()["cartera"]["id"]
+    nueva = _doc(tmp_path, nueva_id)
+
+    assert [p["id"] for p in nueva["productos"]] == ["prod1", "prod2"]
+    # Los ids se conservan tal cual (la caché y flujos los reutilizan).
+    assert {p["id"] for p in nueva["productos"]} == {"prod1", "prod2"}
+    assert {m["producto"] for m in nueva["movimientos"]} == {"prod1", "prod2"}
+    assert {v["producto"] for v in nueva["valoraciones"]} == {"prod1", "prod2"}
+
+    # El origen no cambia: sigue con sus 4 productos y todos sus movimientos.
+    actual = _doc(tmp_path, "origen")
+    assert {p["id"] for p in actual["productos"]} == {p["id"] for p in original["productos"]}
+    assert actual["movimientos"] == original["movimientos"]
+    assert actual["valoraciones"] == original["valoraciones"]
+    assert r.get_json()["origen"] == "origen"
+
+
+def test_extraer_mover_baja_la_origen(entorno):
+    """Extraer con mover=true → el origen pierde esos productos (y sus movimientos
+    y valores); los otros se quedan con los suyos."""
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    _carta_cuatro(tmp_path)
+
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "Selección", "productos": ["prod1", "prod3"],
+                           "desde": "origen", "mover": True}, headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    nueva_id = r.get_json()["cartera"]["id"]
+
+    origen = _doc(tmp_path, "origen")
+    assert {p["id"] for p in origen["productos"]} == {"prod2", "prod4"}
+    assert {m["producto"] for m in origen["movimientos"]} == {"prod2", "prod4"}
+    assert {v["producto"] for v in origen["valoraciones"]} == {"prod2", "prod4"}
+    # La respuesta indica cuántos productos quedan en el origen (para avisar).
+    assert r.get_json()["restantes"] == 2
+
+    nueva = _doc(tmp_path, nueva_id)
+    assert {p["id"] for p in nueva["productos"]} == {"prod1", "prod3"}
+
+
+def test_comparador_solo_productos_que_existen(entorno):
+    """En ambos documentos, `comparador[].pesos` solo cita productos existentes;
+    las entradas de pesos vacías se tiran (como en almacen.borra_producto)."""
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    _carta_cuatro(tmp_path)
+
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "Selección", "productos": ["prod1", "prod2"],
+                           "desde": "origen", "mover": True}, headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    nueva_id = r.get_json()["cartera"]["id"]
+    nueva, origen = _doc(tmp_path, nueva_id), _doc(tmp_path, "origen")
+
+    for doc in (nueva, origen):
+        ids = {p["id"] for p in doc["productos"]}
+        for c in doc["comparador"]:
+            for pid in (c.get("pesos") or {}):
+                assert pid in ids, f"peso «{pid}» sin producto en {c.get('id')}"
+            # Ninguna entrada de pesos queda vacía.
+            assert c.get("real") or c.get("pesos"), c
+
+    # En la nueva solo sobrevive la entrada «cuatro25» recortada a prod1/prod2.
+    por_id = {c["id"]: c for c in nueva["comparador"]}
+    assert por_id["cuatro25"]["pesos"] == {"prod1": 25, "prod2": 25}
+    assert "tressolo" not in por_id          # quedaba vacía (prod3/prod4 no vienen)
+    # En el origen (se llevan prod1/prod2) «cuatro25» queda a prod3/prod4 y
+    # «tressolo» se conserva íntegro (sus pesos seguían existiendo).
+    por_id_o = {c["id"]: c for c in origen["comparador"]}
+    assert por_id_o["cuatro25"]["pesos"] == {"prod3": 25, "prod4": 25}
+    assert por_id_o["tressolo"]["pesos"] == {"prod3": 50, "prod4": 50}
+
+
+def test_extraer_rechaza_y_no_crea(entorno):
+    """Id desconocido, lista vacía o `desde` que no existe → 400 en español y no
+    se crea ninguna cartera."""
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    _carta_cuatro(tmp_path)
+    h = {"X-Rumbo": "1"}
+    ids_antes = _ids_carteras(tmp_path)
+
+    for cuerpo in (
+        {"nombre": "X", "productos": ["inexistente"], "desde": "origen"},
+        {"nombre": "X", "productos": [], "desde": "origen"},
+        {"nombre": "X", "productos": ["prod1"], "desde": "no_existe"},
+    ):
+        r = cliente.post("/api/carteras/extraer", json=cuerpo, headers=h)
+        assert r.status_code == 400, cuerpo
+        assert r.get_json()["ok"] is False
+        assert r.get_json()["errores"]
+    # No se ha creado ninguna cartera en ningún intento fallido.
+    assert _ids_carteras(tmp_path) == ids_antes
+    assert not os.path.exists(os.path.join(str(tmp_path), "carteras", "x.json"))
+
+
+def test_extraer_funcion_pura_persiste_nueva_antes(entorno):
+    """`carteras.extrae` devuelve (nueva, origen) y deja la nueva en disco
+    (añadida al índice) antes de tocar el origen aunque mover=True."""
+    servidor, tmp_path = entorno
+    _carta_cuatro(tmp_path)
+
+    nueva, origen = carteras.extrae(tmp_path, "origen", "Mía", ["prod4"], mover=True)
+    assert {p["id"] for p in nueva["productos"]} == {"prod4"}
+    assert {p["id"] for p in origen["productos"]} == {"prod1", "prod2", "prod3"}
+    nueva_id = [c["id"] for c in carteras.lee_indice(tmp_path)["carteras"]
+                if c.get("id") != "origen"]
+    assert len(nueva_id) == 1 and os.path.exists(carteras.ruta(tmp_path, nueva_id[0]))
+    # El origen sigue en disco, ya sin el producto extraído.
+    assert {p["id"] for p in _doc(tmp_path, "origen")["productos"]} == {"prod1", "prod2", "prod3"}
+
+
+def test_extraer_motor_calcula_ambas(entorno):
+    """Tras mover un subconjunto, el motor calcula ambas carteras sin avisos."""
+    from app import motor
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    _carta_cuatro(tmp_path)
+
+    r = cliente.post("/api/carteras/extraer",
+                     json={"nombre": "Selección", "productos": ["prod1", "prod2"],
+                           "desde": "origen", "mover": True}, headers={"X-Rumbo": "1"})
+    nueva_id = r.get_json()["cartera"]["id"]
+
+    for cid, doc in (("origen", _doc(tmp_path, "origen")), (nueva_id, _doc(tmp_path, nueva_id))):
+        datos = motor.construir(doc, tmp_path, descargar=False)
+        assert datos is not None
+        assert set(p["id"] for p in datos.get("productos", [])) == \
+            {p["id"] for p in doc["productos"]}

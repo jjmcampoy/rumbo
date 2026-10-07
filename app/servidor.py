@@ -409,6 +409,44 @@ def api_carteras_borrar(cid):
     return jsonify(ok=True, activa=_cid())
 
 
+@app.post("/api/carteras/extraer")
+def api_carteras_extraer():
+    """Extrae productos de una cartera a una nueva: copia los seleccionados (con
+    sus movimientos y valores), y si `mover` es true también los quita del origen."""
+    if modo() == "demo":
+        return jsonify(ok=False, errores=[AVISO_DEMO]), 403
+    cuerpo = request.get_json(silent=True) or {}
+    nombre = cuerpo.get("nombre")
+    ids = cuerpo.get("productos")
+    mover = bool(cuerpo.get("mover"))
+    desde = cuerpo.get("desde") or _cid()
+    if not ((nombre or "").strip()):
+        return jsonify(ok=False, errores=["Ponle un nombre a la cartera."]), 400
+    if not isinstance(ids, list) or not ids:
+        return jsonify(ok=False, errores=["Selecciona al menos un producto para extraer."]), 400
+    con_ids = [str(i) for i in ids]
+    with cerrojo:
+        ids_antes = {c.get("id") for c in carteras.lee_indice(DATOS).get("carteras") or []}
+        try:
+            nueva, origen = carteras.extrae(DATOS, desde, nombre, con_ids, mover=mover)
+        except carteras.ErrorCartera as e:
+            return jsonify(ok=False, errores=e.errores), 400
+        # La cartera nueva es la única entrada del índice que no estaba antes.
+        nueva_meta = next(c for c in carteras.lee_indice(DATOS).get("carteras") or []
+                          if c.get("id") not in ids_antes)
+        # El cálculo derivado de la cartera nueva no lo hereda de ninguna otra.
+        calc = ruta_calculado(nueva_meta["id"])
+        if os.path.exists(calc):
+            os.remove(calc)
+        activa = carteras.activa(DATOS)
+    return jsonify(ok=True,
+                   cartera={"id": nueva_meta["id"], "nombre": nueva_meta["nombre"]},
+                   origen=desde, movidos=len(con_ids),
+                   restantes=len(origen.get("productos", [])),
+                   carteras=[{**c, "activa": c.get("id") == activa}
+                             for c in carteras.lista(DATOS)])
+
+
 # ---------------------------------------------------------------- importar
 
 PLANES = {}   # vista previa pendiente de confirmar: {token: plan}
