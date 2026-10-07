@@ -26,6 +26,7 @@ Herramienta **gratuita** hecha por **Dani Dominguez Quant**. Si te resulta útil
 - [Meter tus datos](#meter-tus-datos)
 - [Importar de golpe (MyInvestor, Excel o con una IA)](#importar-de-golpe)
 - [El día a día](#el-día-a-día)
+- [Varias carteras](#varias-carteras)
 - [¿Y si lo hubieras metido todo en un indexado?](#y-si-lo-hubieras-metido-todo-en-un-indexado)
 - [Copias de seguridad y cambiar de ordenador](#copias-de-seguridad-y-cambiar-de-ordenador)
 - [Publicar tu panel como web](#publicar-tu-panel-como-web)
@@ -179,6 +180,12 @@ Las ventas descuentan el coste por **FIFO** (primero lo más antiguo), como hace
 
 Si el fondo no existe todavía, se crea solo. Cada importación **sustituye** lo que importaste antes de ese fondo, así que puedes repetirlo cada mes sin duplicar nada.
 
+El CSV trae la cabecera **`Fecha fiscal;Inversión;Valor de mercado;Resultado fiscal`**: no incluye las **participaciones**. La app las calcula dividiendo la **inversión** entre el **valor liquidativo (VL) de la fecha fiscal**; si un lote llegó por **traspaso** —y por tanto no hubo una compra que dar de alta— usa el **valor de mercado** que trae el extracto, que es la única cifra fiable de ese lote.
+
+> **Si ya habías importado fondos con una versión anterior, vuelve a importar cada fondo** (el mismo CSV, el mismo botón) después de actualizar. Así se corrigen las participaciones que quedaron guardadas con la fórmula antigua y desaparecen las ventas fantasma que esa fórmula podía inventarse. El extracto no cambia: solo se lee mejor.
+
+Las **plusvalías de los lotes ya vendidos** (la columna `Resultado fiscal`) se te muestran en la **vista previa al importar**, para que cuadres con tu bróker, pero **no entran en el panel**: el extracto no dice cuándo vendiste, así que no se pueden colocar en la curva.
+
 MyInvestor no permite descargar las órdenes de **ETF o acciones**: haz capturas de pantalla de tus órdenes y usa la opción **«Con ayuda de una IA»**.
 
 ### Plantilla de Excel o CSV (cualquier banco)
@@ -250,6 +257,22 @@ EXTRACTO:
 - **Solo largo plazo**: el botón del panel quita lo que no es inversión (tu colchón, las cuentas…) y recalcula todas las cifras. Cada producto tiene su interruptor «Inversión a largo plazo».
 - **Modo vídeo** (tecla `V`): esconde los controles y agranda las cifras. Las teclas `1` a `6` cambian de pestaña.
 - **Tema claro u oscuro** con el botón **«Tema»**.
+
+---
+
+## Varias carteras
+
+Puedes tener **varias carteras** en la misma instalación y cambiar de una a otra sin cerrar la app. Sirve para separar cosas que quieres medir por su cuenta: tu patrimonio principal, la cartera de los hijos, una cartera de prueba…
+
+- **Cambiar de cartera**: el desplegable de arriba, junto al nombre de la app. Al elegir otra, el panel se recarga con sus datos.
+- **Gestionarlas**: en **Mis datos → Portfolios** tienes la lista, con el número de productos y la fecha de creación, y desde ahí puedes **activar**, **renombrar**, **duplicar** (una copia con los mismos productos y cifras) o **borrar**. Al borrar se guarda una copia antes, por si acaso, y la última cartera que queda no se puede borrar.
+- **Crear una nueva**, vacía, como copia de otra o como copia del ejemplo.
+- **Extraer productos**: elige productos de la cartera activa y llévalos a una cartera nueva, **copiándolos** (siguen en las dos) o **moviéndolos** (salen de la original). Sus movimientos y sus valores anotados se van con ellos.
+- **Comparar**: la tabla **Comparar**, en esa misma pantalla, pone una cartera debajo de otra —valor, aportado, plusvalía, rentabilidad, TIR y número de productos— con una fila **TOTAL** que suma el dinero de todas y recalcula los porcentajes sobre ese total (no es una media). Debajo tienes la **gráfica de evolución conjunta**, con una línea por cartera y el total destacado. El botón **«Recalcular»** lo vuelve a pedir todo.
+- **Dos carteras a la vez**: si añades `?cartera=<id>` a la dirección del panel, esa pestaña se queda con esa cartera **sin cambiar la que tienes activa**. Abre dos pestañas, una por cartera, y las ves en paralelo.
+- Cada cartera guarda **sus propios cálculos y sus propias copias**, y la TIR, la comparación con el indexado y la curva se calculan para la cartera activa.
+
+> Tus datos siguen en `mis_datos`, ahora en una carpeta **`carteras/`** con un archivo por cartera y un `indice.json` con la lista. Si vienes de una versión anterior, la app **pasa tu cartera a la estructura nueva la primera vez que la abres** y deja el archivo original guardado en `mis_datos/copias/` por si acaso.
 
 ---
 
@@ -339,26 +362,30 @@ Lee el mensaje de la ventana: casi siempre dice qué pasa. Lo más habitual es n
 
 ## Seguridad
 
-El diseño es local y de un solo usuario: **la app no tiene autenticación y no debe exponerse a internet**. Para desplegarla en tu red (por ejemplo, en un NAS), ponla detrás de un proxy y fija la variable de entorno **`RUMBO_HOSTS`** con los nombres por los que se podrá abrir (por defecto solo `127.0.0.1` y `localhost`). Los detalles —cómo reportar una vulnerabilidad, las cabeceras de seguridad y las limitaciones— están en [`SECURITY.md`](SECURITY.md).
+El diseño es local y de un solo usuario: **la app no tiene autenticación y no debe exponerse a internet**. Para desplegarla en tu red (por ejemplo, en un NAS), ponla **detrás de un proxy con autenticación** —que la app no la pone: eso es cosa del proxy— y fija la variable de entorno **`RUMBO_HOSTS`** con la lista de nombres por los que se podrá abrir, separados por comas (por defecto solo `127.0.0.1` y `localhost`). Cualquier petición con otro `Host` se rechaza con un `421`.
+
+La app sí se protege de lo que puede hacer ella sola: manda **cabeceras de seguridad** (incluida una `Content-Security-Policy`), exige su propia cabecera en las peticiones que escriben para que no valga una web ajena (CSRF), rechaza los orígenes cruzados, limita el tamaño y el número de archivos que subes, y guarda tus datos con permisos solo para tu usuario. Con el mismo límite de siempre: **un solo usuario, sin cuentas**. Los detalles —cómo reportar una vulnerabilidad, las cabeceras y las limitaciones— están en [`SECURITY.md`](SECURITY.md).
 
 ---
 
 ## Limitaciones conocidas
 
 - Los precios vienen de servicios **gratuitos y no oficiales**. Casi siempre van bien, pero pueden fallar o traer algún dato raro. Si una fuente no responde, la app usa el último precio guardado y te avisa.
-- Del CSV de MyInvestor solo se conoce la **plusvalía** de lo ya vendido, no la fecha de venta: tu patrimonio de hoy sale bien, pero la curva no refleja cuándo vendiste.
+- Del CSV de MyInvestor se conoce la **plusvalía de lo ya vendido** (la columna `Resultado fiscal`), pero no la **fecha de venta**: tu patrimonio de hoy sale bien, pero la curva no refleja cuándo vendiste.
+- Esa plusvalía de los lotes vendidos **no se suma a la «plusvalía ya materializada»** del panel: se te enseña al importar, para que cuadres con tu bróker, y ahí se queda. Si quieres que cuente, anota la venta a mano en **Movimientos**.
+- En un lote que llegó por **traspaso**, el valor y la ganancia son exactos, pero la **curva histórica anterior al traspaso** se dibuja con el VL del fondo de destino, porque el extracto no fecha el traspaso. Por eso la `rentabilidad` de ese fondo incluye también lo que el dinero ganó en el fondo anterior: es la realidad fiscal (subrogación), no un error de cálculo.
 - No calcula **impuestos**.
 - La versión de **Mac** no se ha podido probar en un Mac real.
 - Es de **un solo usuario**: no hay cuentas ni autenticación, y no debe exponerse a internet (ver [SECURITY.md](SECURITY.md)).
 - Los datos de `mis_datos` **no están cifrados** en disco.
-- No hay **multi-cartera** hasta la versión 1.2: una sola cartera por instalación.
+- Las demás pestañas (productos, movimientos, comparador con el indexado…) trabajan siempre sobre la **cartera activa**. Para ver otra, cámbiala en el desplegable o abre una pestaña con `?cartera=<id>`.
 
 ---
 
 ## Para curiosos: cómo está hecho
 
 - **Python + Flask** para el servidor local; el panel es HTML, CSS y JavaScript sin librerías externas (gráficos SVG propios). Sin Node.
-- Los datos están en `mis_datos/cartera.json`: productos, movimientos y valores anotados.
+- Los datos están en `mis_datos/carteras/<id>.json` (un archivo por cartera, más un `indice.json` con la lista y cuál está activa): productos, movimientos y valores anotados.
 - Para arrancarlo a mano: `uv run python -m app`.
 
 ```
@@ -369,6 +396,7 @@ app/
   buscar.py      buscador de productos (Morningstar, Yahoo, CoinGecko)
   importar.py    importadores (MyInvestor, plantilla, texto de la IA)
   almacen.py     validación y guardado, con copias automáticas
+  carteras.py    el catálogo de carteras (índice, crear, renombrar, borrar, migrar)
   exportar.py    el panel como web estática
   web/           el panel (index.html, app.js, graficos.js, editor.js)
 demo/            la cartera de ejemplo
