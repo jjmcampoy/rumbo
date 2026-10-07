@@ -456,12 +456,18 @@
     datos.forEach((d, i) => {
       const barrido = (d.valor / total) * Math.PI * 2;
       const a0 = ang, a1 = ang + barrido;
-      const grande = barrido > Math.PI ? 1 : 0;
       const p = (r, a) => `${(cx + r * Math.cos(a)).toFixed(2)} ${(cy + r * Math.sin(a)).toFixed(2)}`;
-      const dd = `M${p(R, a0)} A${R} ${R} 0 ${grande} 1 ${p(R, a1)} L${p(r0, a1)} A${r0} ${r0} 0 ${grande} 0 ${p(r0, a0)} Z`;
-      const arco = el("path", { d: dd, fill: d.color, class: "arco", "data-i": i });
-      svg.appendChild(arco);
-      arcos.push({ arco, d, a: (a0 + a1) / 2 });
+      // Un solo dato barre 2π; se emite como dos semicírculos de π porque un arco
+      // de 360° no se dibuja (sus extremos coinciden).
+      const pts = barrido >= Math.PI * 2 - 1e-6 ? [a0, a0 + Math.PI, a1] : [a0, a1];
+      for (let k = 0; k < pts.length - 1; k++) {
+        const b0 = pts[k], b1 = pts[k + 1];
+        const grande = (b1 - b0) > Math.PI ? 1 : 0;
+        const dd = `M${p(R, b0)} A${R} ${R} 0 ${grande} 1 ${p(R, b1)} L${p(r0, b1)} A${r0} ${r0} 0 ${grande} 0 ${p(r0, b0)} Z`;
+        const arco = el("path", { d: dd, fill: d.color, class: "arco", "data-i": i });
+        svg.appendChild(arco);
+        arcos.push({ arco, d, a: (b0 + b1) / 2 });
+      }
       ang = a1;
     });
     const centro = el("g", { class: "donutCentro" });
