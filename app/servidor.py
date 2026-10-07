@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, has_request_context, jsonify, request, send_from_directory
 from werkzeug.serving import make_server
 
 from . import almacen, buscar, carteras, exportar, importar, motor, plantilla
@@ -120,9 +120,23 @@ def escribe_json(ruta, datos):
     os.chmod(ruta, 0o600)
 
 
+def _cid_fuente():
+    """La cartera señalada explícitamente en la petición, solo si es válida
+    y existe: la cabecera X-Rumbo-Cartera (llamadas fetch) o el parámetro
+    ?cartera= (etiquetas <script>, que no pueden mandar cabeceras).
+    Inválida o inexistente -> None (vuelve la cartera activa)."""
+    if not has_request_context():
+        return None
+    cid = request.headers.get("X-Rumbo-Cartera") or request.args.get("cartera")
+    if cid and carteras.id_valido(cid) and carteras.existe(DATOS, cid):
+        return cid
+    return None
+
+
 def _cid():
-    """La cartera activa; si no hay ninguna, la id por defecto (layout nuevo)."""
-    return carteras.activa(DATOS) or carteras.ID_DEFECTO
+    """La cartera de la petición, o la activa si no la señala; si no hay
+    ninguna, la id por defecto (layout nuevo)."""
+    return _cid_fuente() or carteras.activa(DATOS) or carteras.ID_DEFECTO
 
 
 def ruta_cartera(cid=None):
@@ -200,9 +214,10 @@ def inicio():
 
 @app.get("/datos.js")
 def datos_js():
-    datos = lee_json(ruta_calculado())
-    if datos is None and not os.path.exists(ruta_calculado()):
-        datos = recalcula(descargar=False)
+    cid = _cid()  # si la URL lleva ?cartera=, sirve esa cartera (pestañas independientes)
+    datos = lee_json(ruta_calculado(cid))
+    if datos is None and not os.path.exists(ruta_calculado(cid)):
+        datos = recalcula(descargar=False, cid=cid)
     cuerpo = "window.DATOS = " + json.dumps(datos, ensure_ascii=False, separators=(",", ":")) + ";\n"
     return Response(cuerpo, mimetype="application/javascript",
                     headers={"Cache-Control": "no-store"})

@@ -36,10 +36,15 @@
     guarda(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* da igual */ } },
   };
   E.vista = new URLSearchParams(location.search).get("vista") || recuerda.lee("patrimonio.editor") || "productos";
+  // ?cartera=<id>: esta pestaña mira esa cartera; sin parámetro, nada cambia.
+  const cidCart = new URLSearchParams(location.search).get("cartera");
+  const cabCartera = cidCart ? { "X-Rumbo-Cartera": cidCart } : {};
 
   async function api(metodo, url, cuerpo) {
+    const cab = { "Content-Type": "application/json", "X-Rumbo": "1" };
+    Object.assign(cab, cabCartera);
     const r = await fetch(url, {
-      method: metodo, headers: { "Content-Type": "application/json", "X-Rumbo": "1" },
+      method: metodo, headers: cab,
       body: cuerpo ? JSON.stringify(cuerpo) : undefined,
     });
     let j = {};
@@ -671,7 +676,8 @@
     b.disabled = true;
     b.textContent = "Revisando y buscando precios…";
     try {
-      const r = await fetch("api/importar/previsualizar", { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
+      const cabIm = Object.assign({ "X-Rumbo": "1" }, cabCartera);
+      const r = await fetch("api/importar/previsualizar", { method: "POST", headers: cabIm, body: fd });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) throw new Error((j.errores || ["Algo ha fallado al leerlo."]).join("\n"));
       IMP.informe = j.informe;
@@ -1017,7 +1023,8 @@
     if (E.modo === "propio" && !confirm("Esto sustituye tu cartera actual por la de la copia. Tu cartera actual se guarda antes en «Copias automáticas». ¿Seguir?")) return;
     const fd = new FormData();
     fd.append("archivo", inp.files[0]);
-    const r = await fetch("api/copia/subir", { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
+    const cabSub = Object.assign({ "X-Rumbo": "1" }, cabCartera);
+    const r = await fetch("api/copia/subir", { method: "POST", headers: cabSub, body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) { fallo.textContent = (j.errores || ["No he podido leer la copia."]).join("\n"); fallo.hidden = false; return; }
     recuerda.guarda("patrimonio.tab", "datos");

@@ -8,6 +8,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import stat
 
 from app import carteras
@@ -691,3 +692,33 @@ def test_instalacion_fresca_no_crea_nada(entorno):
     cliente = servidor.app.test_client()
     assert cliente.get("/api/cartera").get_json()["modo"] == "demo"
     assert list(os.listdir(str(tmp_path))) == []
+
+
+def _datos_de_respuesta(texto):
+    """El objeto asignado a `window.DATOS` en el texto de /datos.js."""
+    m = re.search(r"window\.DATOS = (\{.*\});\s*$", texto.strip(), re.S)
+    assert m, texto[:120]
+    return json.loads(m.group(1))
+
+
+def test_datos_js_con_cartera_de_url(entorno):
+    """Dos pestañas independientes: /datos.js?cartera=otra sirve los datos de
+    esa cartera. Id inválido o inexistente -> la activa, sin error."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+
+    # Sin parámetro: la activa (alfa)
+    j = _datos_de_respuesta(cliente.get("/datos.js").get_data(as_text=True))
+    assert j["titular"] == "Cartera A"
+
+    # La otra cartera por URL: los DATOS son los de beta
+    j = _datos_de_respuesta(cliente.get("/datos.js?cartera=beta").get_data(as_text=True))
+    assert j["titular"] == "Cartera B"
+    assert j["productos"][0]["id"] == "prod_b"
+
+    # Id inválido (mayúsculas) o inexistente -> la activa, sin error
+    for mal in ("BETA", "no_existe"):
+        r = cliente.get("/datos.js?cartera=" + mal)
+        assert r.status_code == 200
+        assert _datos_de_respuesta(r.get_data(as_text=True))["titular"] == "Cartera A"

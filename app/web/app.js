@@ -19,6 +19,7 @@
 
   // ?tab=rendimiento&tema=claro abre directamente esa pestaña con ese tema.
   const qs = new URLSearchParams(location.search);
+  const cidCart = qs.get("cartera");  // ?cartera=<id>: esta pestaña mira esa cartera
   if (qs.get("tab")) recuerda.guarda("patrimonio.tab", qs.get("tab"));
   if (qs.get("tema")) recuerda.guarda("patrimonio.tema", qs.get("tema"));
 
@@ -1052,7 +1053,8 @@
   /* ---------------------------------------------- bitcoin en vivo */
   async function traeBtc() {
     try {
-      const r = await fetch("api/vivo", { cache: "no-store" });
+      const r = await fetch("api/vivo", { cache: "no-store",
+        headers: cidCart ? { "X-Rumbo-Cartera": cidCart } : {} });
       if (!r.ok) return null;
       const j = await r.json();
       return (j && j.ok && isFinite(j.precio)) ? j.precio : null;
@@ -1105,7 +1107,9 @@
     b.disabled = true;
     b.textContent = "↻ Actualizando…";
     try {
-      const r = await fetch("api/actualizar", { method: "POST", headers: { "X-Rumbo": "1" } });
+      const cab = { "X-Rumbo": "1" };
+      if (cidCart) cab["X-Rumbo-Cartera"] = cidCart;  // actualiza solo esta cartera
+      const r = await fetch("api/actualizar", { method: "POST", headers: cab });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
       location.reload();
