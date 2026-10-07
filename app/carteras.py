@@ -96,7 +96,9 @@ def escribe_indice(datos, indice):
 
 
 def _escribe_documento(ruta, doc):
-    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    # Con `mode` por si la carpeta nace aquí (la migración corre al importar,
+    # antes de que `main()` ponga `os.umask(0o077)`): 0700, como el resto.
+    os.makedirs(os.path.dirname(ruta), mode=0o700, exist_ok=True)
     tmp = ruta + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)

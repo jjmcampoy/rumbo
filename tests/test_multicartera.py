@@ -4,12 +4,14 @@
 Cada cartera tiene su propio `carteras/<cid>.json`; el motor, el estado y los
 historicos van a rutas que dependen del `cid` activo.
 """
+import hashlib
 import importlib
 import json
 import os
+import stat
 
 from app import carteras
-from tests.conftest import cartera_en_disco, cartera_en_disco_v2
+from tests.conftest import cartera_en_disco, cartera_en_disco_v2, escribe_json
 
 CARPETA_A = {
     "version": 1, "titular": "Cartera A",
@@ -525,3 +527,167 @@ def test_extraer_motor_calcula_ambas(entorno):
         assert datos is not None
         assert set(p["id"] for p in datos.get("productos", [])) == \
             {p["id"] for p in doc["productos"]}
+
+
+# ---------------------------------------------------------------- aceptación (T-36)
+
+CARTERA_RICA_LEGADA = {
+    "version": 1, "titular": "Cartera legado rica",
+    "productos": [
+        {"id": "leg1", "nombre": "Producto legado", "corto": "Leg",
+         "tipo": "accion", "fuente": "manual", "codigo": "AAA",
+         "moneda": "EUR", "slot": 1, "largoPlazo": True}],
+    "movimientos": [{"id": "ml", "fecha": "2023-01-01", "producto": "leg1",
+                     "tipo": "compra", "unidades": 5, "importe": 500.0}],
+    "valoraciones": [{"id": "vl", "fecha": "2023-06-01", "producto": "leg1",
+                      "valor": 60.0}],
+    "comparador": [{"id": "real", "nombre": "Mi cartera real", "real": True},
+                   {"id": "cuarto", "nombre": "Cuartos", "pesos": {"leg1": 100}}],
+    "hitos": [10000, 50000],
+    "objetivo": {"activo": True, "importe": 100000, "etiqueta": "Meta"},
+}
+
+
+def _perm(ruta):
+    """Modo (permisos) de un archivo o directorio."""
+    return stat.S_IMODE(os.stat(ruta).st_mode)
+
+
+def _sha(ruta):
+    """Sha256 de un archivo, para comparar «idéntico» sin depender del reloj."""
+    with open(ruta, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _legado_rico(tmp_path):
+    """Directorio 1.1.1 completo: cartera, caché compartida, copia automática,
+    estado y cálculo propio (los dos últimos son planos, como en la 1.1.1)."""
+    d = str(tmp_path)
+    escribe_json(os.path.join(d, "cartera.json"), CARTERA_RICA_LEGADA)
+    escribe_json(os.path.join(d, "cache", "AAA.json"), {"2024-01-01": 100.0})
+    escribe_json(os.path.join(d, "copias", "auto_x.json"), {"legacy": True})
+    escribe_json(os.path.join(d, "estado.json"), {"preciosActualizados": "2024-01-01T00:00:00"})
+    escribe_json(os.path.join(d, "calculado_propio.json"), {"legacy": True})
+
+
+def test_permisos_del_layout_nuevo(entorno):
+    """F-11 en el layout multicartera: carteras/ es 0700 y cada archivo que
+    contiene, 0600; también cuando la carpeta nace con la migración al importar
+    (antes de que `main()` pudiera aplicar el umask)."""
+    servidor, tmp_path = entorno
+    _legado_rico(tmp_path)
+    importlib.reload(servidor)             # migra al importar: carteras/ nace aquí
+    dir_carts = carteras.ruta_carteras(tmp_path)
+    assert _perm(dir_carts) == 0o700
+    for r in (carteras.ruta_indice(tmp_path), carteras.ruta(tmp_path, carteras.ID_DEFECTO)):
+        assert _perm(r) == 0o600
+
+    # Y también al crear una cartera desde cero (modo propio ya migrado).
+    cliente = servidor.app.test_client()
+    r = cliente.post("/api/carteras", json={"nombre": "Segunda", "desde": "vacia"},
+                     headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    assert _perm(dir_carts) == 0o700
+    assert _perm(carteras.ruta(tmp_path, r.get_json()["cartera"]["id"])) == 0o600
+
+
+def test_fidelidad_de_la_migracion_rica(entorno):
+    """Un directorio 1.1.1 rico migra sin pérdida: el API devuelve el mismo
+    documento (==), la caché compartida y la copia del legado sobreviven, y el
+    archivo heredado queda de respaldo bajo copias/."""
+    servidor, tmp_path = entorno
+    _legado_rico(tmp_path)
+    importlib.reload(servidor)
+    d = str(tmp_path)
+    cliente = servidor.app.test_client()
+
+    j = cliente.get("/api/cartera").get_json()
+    assert j["modo"] == "propio"
+    assert j["cartera"] == CARTERA_RICA_LEGADA          # mismo documento, == en el JSON
+
+    # La caché es compartida: sigue en el sitio de siempre.
+    assert os.path.exists(os.path.join(d, "cache", "AAA.json"))
+    # La copia automática del legado se conserva tal cual.
+    assert os.path.exists(os.path.join(d, "copias", "auto_x.json"))
+    # Y el archivo heredado queda de respaldo bajo copias/.
+    respaldos = [n for n in os.listdir(os.path.join(d, "copias"))
+                 if n.startswith("migrada_") and n.endswith(".json")]
+    assert respaldos
+    # El original ya no está en la raíz.
+    assert not os.path.exists(os.path.join(d, "cartera.json"))
+
+
+def test_aislamiento_total_y_borrado(entorno):
+    """Escribir en A no toca el JSON de B (idéntico a byte); borrar A tampoco
+    lo toca, y A termina en copias/alfa/."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+    r_alfa, r_beta = carteras.ruta(tmp_path, "alfa"), carteras.ruta(tmp_path, "beta")
+    sha_beta_0 = _sha(r_beta)
+
+    r = cliente.post("/api/productos",
+                     json={"nombre": "Nuevo en A", "tipo": "fondo", "fuente": "manual"},
+                     headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    assert _sha(r_beta) == sha_beta_0                  # B idéntico a byte
+
+    r = cliente.delete("/api/carteras/alfa", headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    assert r.get_json()["activa"] == "beta"            # la activa pasa a B
+    assert not os.path.exists(r_alfa)                  # A ya no está
+    assert _sha(r_beta) == sha_beta_0                  # B sigue idéntico a byte
+    # Y A quedó de respaldo bajo copias/alfa/.
+    borradas = [n for n in os.listdir(os.path.join(str(tmp_path), "copias", "alfa"))
+                if n.startswith("borrada_")]
+    assert borradas
+
+
+def test_concurrencia_mtimes_entre_carteras(entorno):
+    """Dos POST /api/productos en carteras distintas, en secuencia: cada
+    petición toca solo el archivo de su cartera (los mtimes no cruzan)."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+    h = {"X-Rumbo": "1"}
+    r_alfa, r_beta = carteras.ruta(tmp_path, "alfa"), carteras.ruta(tmp_path, "beta")
+    t0 = 1_700_000_000.0                               # mtime viejo conocido
+    os.utime(r_alfa, (t0, t0))
+    os.utime(r_beta, (t0, t0))
+
+    r = cliente.post("/api/productos",
+                     json={"nombre": "En A", "tipo": "fondo", "fuente": "manual"}, headers=h)
+    assert r.status_code == 200
+    m_alfa = os.path.getmtime(r_alfa)
+    assert m_alfa > t0                                 # A sí se tocó
+    assert os.path.getmtime(r_beta) == t0              # B no se tocó
+
+    carteras.activa_set(tmp_path, "beta")
+    r = cliente.post("/api/productos",
+                     json={"nombre": "En B", "tipo": "fondo", "fuente": "manual"}, headers=h)
+    assert r.status_code == 200
+    assert os.path.getmtime(r_beta) > t0               # B se tocó
+    assert os.path.getmtime(r_alfa) == m_alfa          # A no volvió a tocarse
+
+
+def test_idempotencia_de_la_migracion(entorno):
+    """Recargar el servidor tres veces sobre un directorio ya migrado no
+    cambia el índice ni el documento (comparado por suma de comprobación)."""
+    servidor, tmp_path = entorno
+    _legado_rico(tmp_path)
+    importlib.reload(servidor)
+    suma_indice = _sha(carteras.ruta_indice(tmp_path))
+    suma_doc = _sha(carteras.ruta(tmp_path, carteras.ID_DEFECTO))
+    for _ in range(3):
+        importlib.reload(servidor)
+        assert _sha(carteras.ruta_indice(tmp_path)) == suma_indice
+        assert _sha(carteras.ruta(tmp_path, carteras.ID_DEFECTO)) == suma_doc
+
+
+def test_instalacion_fresca_no_crea_nada(entorno):
+    """En una carpeta vacía la app queda en modo demo y no crea ni un archivo
+    ni un directorio: sin datos propios, sin efectos en el disco."""
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    assert cliente.get("/api/cartera").get_json()["modo"] == "demo"
+    assert list(os.listdir(str(tmp_path))) == []
