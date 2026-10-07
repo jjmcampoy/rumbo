@@ -324,11 +324,16 @@
   function pintaSegm(cont, opciones, activo, alPulsar) {
     if (!cont) return;
     cont.innerHTML = "";
+    const botones = [];
     opciones.forEach(o => {
       const b = document.createElement("button");
       b.textContent = o.et;
       b.setAttribute("aria-pressed", String(o.id === activo));
-      b.onclick = () => alPulsar(o.id);
+      b.onclick = () => {
+        botones.forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+        alPulsar(o.id);
+      };
+      botones.push(b);
       cont.appendChild(b);
     });
   }
