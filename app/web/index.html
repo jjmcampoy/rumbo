@@ -372,6 +372,15 @@ table.dt td.nota{max-width:220px;overflow:hidden;text-overflow:ellipsis;text-ali
 .mForm input:focus,.mForm select:focus,.mForm textarea:focus{outline:0;background:var(--sup);border-color:var(--s1);
   box-shadow:0 0 0 3px color-mix(in srgb,var(--s1) 22%,transparent)}
 .mForm input::placeholder,.mForm textarea::placeholder{color:var(--tinta3);opacity:.8}
+/* -------- vista «Portfolios»: formularios dentro del editor (editor.js) -------- */
+#editor input[name="cNuevoNombre"],#editor input[name="cExtraerNombre"]{
+  font:inherit;font-size:14px;color:var(--tinta);background:var(--sup2);border:1px solid var(--borde);
+  border-radius:11px;height:42px;padding:0 13px;width:100%;box-sizing:border-box;transition:border-color .12s}
+#editor input[name="cNuevoNombre"]:focus,#editor input[name="cExtraerNombre"]:focus{outline:0;background:var(--sup);
+  border-color:var(--s1);box-shadow:0 0 0 3px color-mix(in srgb,var(--s1) 22%,transparent)}
+#editor .radioFila{display:inline-flex;align-items:center;gap:6px;margin:0 16px 0 0;font:inherit;font-size:14px;color:var(--tinta)}
+#editor .extraerList{max-height:220px;overflow:auto;border:1px solid var(--borde);border-radius:11px;
+  padding:8px 14px;margin:6px 0 14px;background:var(--sup2)}
 .conSufijo{position:relative}
 .conSufijo input{padding-right:32px !important;text-align:right;font-variant-numeric:tabular-nums}
 .conSufijo > span{position:absolute;right:13px;top:50%;transform:translateY(-50%);color:var(--tinta3);font-size:14px;pointer-events:none}
@@ -610,6 +619,13 @@ body.video .tarjetaCanal{display:none}
 .marca .marcaSep{width:1px;height:15px;background:var(--borde)}
 .marca #marcaTexto{font-weight:500;color:var(--tinta2);font-size:13.5px}
 @media(max-width:720px){.marca .marcaSep,.marca #marcaTexto{display:none}}
+/* Selector de cartera: oculto hasta que JS lo rellena (la exportación no lo muestra). */
+.selCartera{appearance:none;-webkit-appearance:none;font:inherit;font-size:13px;font-weight:600;
+  color:var(--tinta);background:var(--sup) var(--flecha) no-repeat right 11px center;
+  border:1px solid var(--borde);border-radius:9px;height:30px;padding:0 30px 0 11px;
+  cursor:pointer;max-width:190px}
+.selCartera:hover{border-color:color-mix(in srgb,var(--tinta3) 55%,transparent)}
+#selCartera:focus{outline:0;border-color:var(--s1)}
 </style>
 </head>
 <body>
@@ -618,6 +634,7 @@ body.video .tarjetaCanal{display:none}
   <div class="env">
     <div class="topFila">
       <div class="marca"><img class="logoIcono" src="icono-64.png" alt="" width="24" height="24"><span class="nombreApp">Rumbo</span><span class="marcaSep"></span><span id="marcaTexto">Mi patrimonio</span></div>
+      <select id="selCartera" class="selCartera" hidden aria-label="Cartera"></select>
       <div class="sep"></div>
       <span class="meta" id="metaFecha"></span>
       <button class="btn" id="btnPrecios" title="Descarga los precios de hoy de cada producto">↻ Actualizar precios</button>

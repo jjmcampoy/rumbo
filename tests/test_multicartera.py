@@ -173,7 +173,7 @@ def test_cred_renombrar_borrar(entorno):
     assert ids == ["alfa", nueva["id"], otra["id"]]
     assert j["activa"] == "alfa"
     assert [c["activa"] for c in j["carteras"]] == [True, False, False]
-    assert set(j["carteras"][0]) == {"id", "nombre", "creada", "activa"}   # solo metadata
+    assert set(j["carteras"][0]) == {"id", "nombre", "creada", "activa", "productos"}   # solo metadata
 
     # Renombrar a una: cambia el índice y el titular
     r = cliente.post(f"/api/carteras/{nueva['id']}/renombrar",

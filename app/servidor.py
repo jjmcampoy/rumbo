@@ -336,13 +336,30 @@ def _cartera_de_url(cid):
     return None
 
 
+def _catalogo():
+    """El índice de carteras con el recuento de productos de cada una.
+
+    Solo metadatos: nunca se incluye el documento completo en estas respuestas.
+    """
+    return [{**c, "productos": _n_productos(c.get("id"))}
+            for c in carteras.lista(DATOS)]
+
+
+def _n_productos(cid):
+    """Cuántos productos tiene la cartera; 0 si el documento no se puede leer."""
+    if not carteras.id_valido(cid):
+        return 0
+    doc = lee_json(carteras.ruta(DATOS, cid), {}) or {}
+    productos = doc.get("productos")
+    return len(productos) if isinstance(productos, list) else 0
+
+
 @app.get("/api/carteras")
 def api_carteras():
     """Solo metadata (los documentos pueden ser grandes)."""
     activa = carteras.activa(DATOS)
-    return jsonify(ok=True, activa=activa,
-                   carteras=[{**c, "activa": c.get("id") == activa}
-                             for c in carteras.lista(DATOS)])
+    cat = [{**c, "activa": c.get("id") == activa} for c in _catalogo()]
+    return jsonify(ok=True, activa=activa, carteras=cat)
 
 
 @app.post("/api/carteras")

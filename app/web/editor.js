@@ -8,7 +8,8 @@
   const $ = s => document.querySelector(s);
   const D = window.DATOS;
   const SOLO_SALDO = ["efectivo", "deuda"];
-  const E = { cfg: null, modo: "demo", tipos: {}, fuentes: {}, tiposMov: {}, vista: "productos", filtro: "todos" };
+  const E = { cfg: null, modo: "demo", tipos: {}, fuentes: {}, tiposMov: {}, vista: "productos", filtro: "todos",
+    carteras: [], activa: null };
 
   /* ---------------------------------------------- utilidades */
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -47,7 +48,8 @@
   }
   async function carga() {
     const j = await api("GET", "api/cartera");
-    Object.assign(E, { cfg: j.cartera, modo: j.modo, tipos: j.tipos, fuentes: j.fuentes, tiposMov: j.tiposMovimiento });
+    Object.assign(E, { cfg: j.cartera, modo: j.modo, tipos: j.tipos, fuentes: j.fuentes, tiposMov: j.tiposMovimiento,
+      carteras: j.carteras || [], activa: (j.carteraActiva || {}).id || null });
   }
   async function guarda(coleccion, datos) {
     const j = await api("POST", "api/" + coleccion, datos);
@@ -166,6 +168,7 @@
     cont.innerHTML = html;
 
     const vistas = [["productos", "Productos"], ["movimientos", "Movimientos"], ["saldos", "Saldos y valores"], ["importar", "Importar"], ["copias", "Copias y web"]];
+    if (E.modo === "propio") vistas.push(["carteras", "Portfolios"]);
     const seg = $("#edVistas");
     vistas.forEach(([id, et]) => {
       const b = document.createElement("button");
@@ -175,10 +178,40 @@
       seg.appendChild(b);
     });
     $("#edCuerpo").innerHTML = ({ productos: vistaProductos, movimientos: vistaMovimientos, saldos: vistaSaldos,
-      importar: vistaImportar, copias: vistaCopias }[E.vista] || vistaProductos)();
+      importar: vistaImportar, copias: vistaCopias, carteras: vistaCarteras }[E.vista] || vistaProductos)();
     if (E.vista === "importar" || E.vista === "copias") conectaImportar();
+    if (E.vista === "carteras") conectaCarteras();
     const filtro = $("#edFiltro");
     if (filtro) filtro.onchange = e => { E.filtro = e.target.value; pinta(); };
+    pintaSelector();
+  }
+
+  /* Selector de cartera en la barra superior. Sigue oculto hasta que JS lo
+     rellena: la exportación (sin editor.js) nunca lo muestra. */
+  function pintaSelector() {
+    const sel = $("#selCartera");
+    if (!sel) return;
+    const carteras = E.carteras || [];
+    if (!carteras.length) { sel.hidden = true; return; }
+    sel.innerHTML = carteras.map(c =>
+      `<option value="${esc(c.id)}"${c.id === E.activa ? " selected" : ""}>${esc(c.nombre)}</option>`).join("") +
+      '<option value="__nueva__">➕ Nueva cartera…</option>';
+    sel.hidden = false;
+    sel.onchange = async () => {
+      if (sel.value === "__nueva__") {
+        E.vista = "carteras"; recuerda.guarda("patrimonio.editor", "carteras"); pinta();
+        sel.value = E.activa || "";  // volvemos a la activa: la creación se hace en la vista
+        return;
+      }
+      sel.disabled = true;
+      try {
+        await api("POST", `api/carteras/${sel.value}/activar`);
+        location.reload();
+      } catch (e) {
+        sel.disabled = false;
+        alert(e.message);
+      }
+    };
   }
 
   /* ---------------------------------------------- productos */
@@ -783,6 +816,131 @@
       <p class="ayuda">La web lleva la fecha de hoy: cuando actualices tus datos, vuelve a descargarla y súbela otra vez.</p></section>`;
   }
 
+  /* ---------------------------------------------- carteras */
+  const CAR = { lista: null };
+
+  async function cargaCarteras(force) {
+    const j = await api("GET", "api/carteras");
+    CAR.lista = j.carteras;
+    if (force) pinta();
+  }
+  function conectaCarteras() {
+    if (CAR.lista === null) cargaCarteras(true);
+  }
+
+  function vistaCarteras() {
+    const car = CAR.lista || [];
+    const propia = E.modo === "propio";
+    let contenido;
+    if (!propia) {
+      contenido = '<p class="subt">Las carteras se gestionan cuando tienes tu propia cartera.</p>';
+    } else if (CAR.lista === null) {
+      contenido = '<p class="cargando">Cargando carteras…</p>';
+    } else {
+      const filas = car.map(c => `
+        <tr><td style="text-align:left"><b>${esc(c.nombre)}</b>${c.id === E.activa ? ' <span class="estado">activa</span>' : ""}</td>
+        <td>${c.productos == null ? "—" : c.productos}</td>
+        <td>${fecha(c.creada ? String(c.creada).slice(0, 10) : "")}</td>
+        <td class="acc">
+          ${c.id !== E.activa ? `<button data-acc="activarCartera" data-id="${esc(c.id)}">Activar</button>` : ""}
+          <button data-acc="renombrarCartera" data-id="${esc(c.id)}">Renombrar</button>
+          <button data-acc="duplicarCartera" data-id="${esc(c.id)}">Duplicar</button>
+          <button data-acc="borrarCartera" data-id="${esc(c.id)}">Borrar</button></td></tr>`).join("");
+      const activos = E.cfg.productos || [];
+      const opcionesProd = activos.map(p =>
+        `<label style="display:block;padding:6px 0"><input type="checkbox" name="extraer" value="${esc(p.id)}">
+          ${esc(p.corto || p.nombre)}</label>`).join("");
+      const desdeOpciones = car.map(c => `<option value="${esc(c.id)}">copia de ${esc(c.nombre)}</option>`).join("");
+      contenido = `
+      <section class="tarjeta"><header><h2>Tus carteras</h2>
+        <span class="subt">Cada cartera guarda sus productos, movimientos y valores por separado.</span></header>
+      ${car.length ? `<div class="tablaEnv"><table class="dt"><thead><tr><th style="text-align:left">Cartera</th>
+        <th>Productos</th><th>Creada</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
+        : '<p class="subt">Todavía no hay carteras.</p>'}
+      </section>
+      <section class="tarjeta"><header><h2>Nueva cartera</h2>
+        <span class="subt">Empieza de cero o desde otra cartera.</span></header>
+      <div class="rejilla">
+        ${campo("Nombre", '<input name="cNuevoNombre" required>')}
+        ${campo("Origen", `<select name="cNuevoDesde"><option value="vacia">Vacía</option>${desdeOpciones}
+          <option value="ejemplo">Copia del ejemplo</option></select>`)}
+      </div>
+      <p class="ayuda" style="margin:10px 0 12px">La cartera nueva se crea pero no se activa: pulsa «Activar» para cargarla.</p>
+      <button class="btn prim" data-acc="crearCartera">Crear cartera</button></section>
+      <section class="tarjeta"><header><h2>Extraer productos</h2>
+        <span class="subt">Mueve o copia productos de tu cartera actual a una cartera nueva.</span></header>
+      ${activos.length ? `<p class="ayuda">Selecciona los productos de <b>${esc(E.cfg.titular || "tu cartera")}</b>:</p>
+        <div class="extraerList">${opcionesProd}</div>
+        <div class="rejilla">
+          ${campo("Cartera de destino", '<input name="cExtraerNombre" required>')}
+          <label class="campo"><span class="et">Modo</span>
+            <label class="radioFila"><input type="radio" name="cExtraerModo" value="copiar" checked> Copiar</label>
+            <label class="radioFila"><input type="radio" name="cExtraerModo" value="mover"> Mover (los quita de aquí)</label></label>
+        </div>
+        <button class="btn prim" data-acc="extraerCartera" style="margin-top:12px">Extraer</button>`
+        : '<p class="subt">No hay productos en tu cartera actual que extraer.</p>'}</section>`;
+    }
+    return contenido;
+  }
+
+  async function activarCartera(id) {
+    await api("POST", `api/carteras/${id}/activar`);
+    location.reload();
+  }
+  async function renombrarCartera(id) {
+    const c = (CAR.lista || []).find(x => x.id === id);
+    const nombre = prompt("Nuevo nombre de la cartera", c ? c.nombre : "");
+    if (nombre === null) return;
+    try {
+      await api("POST", `api/carteras/${id}/renombrar`, { nombre });
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function duplicarCartera(id) {
+    const c = (CAR.lista || []).find(x => x.id === id);
+    const nombre = prompt("Nombre de la copia", c ? c.nombre + " (copia)" : "");
+    if (nombre === null || !nombre.trim()) return;
+    try {
+      await api("POST", "api/carteras", { nombre, desde: id });
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function borrarCartera(id) {
+    const c = (CAR.lista || []).find(x => x.id === id);
+    if (!confirm(`¿Borrar la cartera «${c ? c.nombre : id}»? Se guarda una copia antes de borrarla.`)) return;
+    try {
+      await api("DELETE", `api/carteras/${id}`);
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function crearCartera() {
+    const nombre = $("#cNuevoNombre") ? $("#cNuevoNombre").value : "";
+    const desde = $("#cNuevoDesde") ? $("#cNuevoDesde").value : "vacia";
+    if (!nombre.trim()) { alert("Ponle un nombre a la cartera."); return; }
+    try {
+      await api("POST", "api/carteras", { nombre, desde });
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function extraerCartera() {
+    const inpNombre = $("#cExtraerNombre");
+    const nombre = inpNombre ? inpNombre.value : "";
+    const radios = document.querySelector('input[name="cExtraerModo"]:checked');
+    const mover = radios ? radios.value === "mover" : false;
+    const ids = [...document.querySelectorAll('input[name="extraer"]:checked')].map(i => i.value);
+    if (!nombre.trim()) { alert("Ponle un nombre a la cartera de destino."); return; }
+    if (!ids.length) { alert("Selecciona al menos un producto para extraer."); return; }
+    const activos = (E.cfg.productos || []).length;
+    if (mover && ids.length >= activos) {
+      if (!confirm("Esta extracción vaciaría tu cartera actual. ¿Seguir?")) return;
+    }
+    try {
+      const j = await api("POST", "api/carteras/extraer", { nombre, productos: ids, mover });
+      location.reload();
+      if (j.restantes === 0) alert("Tu cartera origen quedó vacía.");
+    } catch (e) { alert(e.message); }
+  }
+
   async function subirCopia() {
     const inp = $("#imArchivos"), fallo = $("#copFallo");
     fallo.hidden = true;
@@ -849,6 +1007,12 @@
     imConfirmar,
     subirCopia,
     recuperarCopia,
+    activarCartera: soloPropio(activarCartera),
+    renombrarCartera: soloPropio(renombrarCartera),
+    duplicarCartera: soloPropio(duplicarCartera),
+    borrarCartera: soloPropio(borrarCartera),
+    crearCartera: soloPropio(crearCartera),
+    extraerCartera: soloPropio(extraerCartera),
     exportarWeb() { location.href = "api/exportar-web?ocultar=" + ($("#webOcultar").checked ? "1" : "0"); },
     verPanelDatos() { recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); },
     async imCopiar() {
