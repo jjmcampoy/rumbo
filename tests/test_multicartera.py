@@ -444,6 +444,70 @@ def test_extraer_funcion_pura_persiste_nueva_antes(entorno):
     assert {p["id"] for p in _doc(tmp_path, "origen")["productos"]} == {"prod1", "prod2", "prod3"}
 
 
+# ---------------------------------------------------------------- importar
+
+import io
+
+CSV_IMPORTAR = (
+    "fecha;tipo_movimiento;importe;unidades;nombre;tipo_producto;moneda\n"
+    "2024-06-15;compra;100.00;10;Fondo Nuevo;fondo;EUR\n"
+)
+
+
+def _previsualiza(cliente, csv=CSV_IMPORTAR):
+    """Previsualiza un CSV de plantilla y devuelve el token de la respuesta."""
+    r = cliente.post("/api/importar/previsualizar",
+                     data={"origen": "plantilla",
+                           "archivos": [(io.BytesIO(csv.encode()), "importado.csv")]},
+                     content_type="multipart/form-data", headers={"X-Rumbo": "1"})
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()["token"]
+
+
+def _mov_de_fondo_nuevo(doc):
+    """Movimientos del producto «Fondo Nuevo» (se crea como producto nuevo al aplicar)."""
+    ids = {p["id"] for p in doc["productos"] if p.get("nombre") == "Fondo Nuevo"}
+    return [m for m in doc["movimientos"] if m.get("producto") in ids]
+
+
+def test_confirmar_otra_cartera_rechaza_y_no_escribe(entorno):
+    """Previsualizar en A, activar B y confirmar → 400 y no se escribe en A ni B."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+
+    antes_a, antes_b = _doc(tmp_path, "alfa"), _doc(tmp_path, "beta")
+    token = _previsualiza(cliente)          # alfa es la activa
+    carteras.activa_set(tmp_path, "beta")    # cambiar de cartera antes de confirmar
+
+    r = cliente.post("/api/importar/confirmar", json={"token": token},
+                     headers={"X-Rumbo": "1"})
+    assert r.status_code == 400
+    assert any("cartera activa ha cambiado" in e.lower() for e in r.get_json()["errores"])
+
+    # Nada se ha escrito en ninguna cartera.
+    assert _doc(tmp_path, "alfa") == antes_a
+    assert _doc(tmp_path, "beta") == antes_b
+
+
+def test_confirmar_misma_cartera_escribe_solo_en_ella(entorno):
+    """Previsualizar en A y confirmar en A → el movimiento llega únicamente a A."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+
+    antes_b = _doc(tmp_path, "beta")
+    token = _previsualiza(cliente)          # alfa es la activa
+    r = cliente.post("/api/importar/confirmar", json={"token": token},
+                     headers={"X-Rumbo": "1"})
+    assert r.status_code == 200, r.get_json()
+
+    doc_alfa = _doc(tmp_path, "alfa")
+    assert _mov_de_fondo_nuevo(doc_alfa)     # A recibió el movimiento
+    assert _doc(tmp_path, "beta") == antes_b  # B no se tocó
+    assert _mov_de_fondo_nuevo(_doc(tmp_path, "beta")) == []
+
+
 def test_extraer_motor_calcula_ambas(entorno):
     """Tras mover un subconjunto, el motor calcula ambas carteras sin avisos."""
     from app import motor

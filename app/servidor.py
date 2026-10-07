@@ -166,20 +166,21 @@ def estado(cid=None):
 
 # ---------------------------------------------------------------- cálculo
 
-def recalcula(descargar):
+def recalcula(descargar, cid=None):
     """Recalcula el panel. Con descargar=True baja antes los precios nuevos;
-    con "faltan", solo los de productos que aún no tienen precios guardados."""
+    con "faltan", solo los de productos que aún no tienen precios guardados.
+    Con cid, recalcula la cartera concreta (no la activa)."""
     with cerrojo:
-        datos = motor.construir(cartera(), DATOS, descargar=descargar,
-                                historico=ruta_historico())
-        est = estado()
+        datos = motor.construir(cartera(cid), DATOS, descargar=descargar,
+                                historico=ruta_historico(cid))
+        est = estado(cid)
         if descargar is True:
             est["preciosActualizados"] = dt.datetime.now().replace(microsecond=0).isoformat()
-            escribe_json(ruta_estado(), est)
+            escribe_json(ruta_estado(cid), est)
         if datos is not None:
             datos["modo"] = modo()
             datos["preciosActualizados"] = est.get("preciosActualizados")
-        escribe_json(ruta_calculado(), datos)
+        escribe_json(ruta_calculado(cid), datos)
         return datos
 
 
@@ -259,19 +260,20 @@ AVISO_DEMO = ("Estás viendo la cartera de ejemplo. Pulsa «Empezar con mis dato
               "para crear la tuya y poder guardar cambios.")
 
 
-def cambia(fn):
-    """Aplica un cambio a la cartera, la guarda (con copia automática) y recalcula."""
+def cambia(fn, cid=None):
+    """Aplica un cambio a la cartera, la guarda (con copia automática) y recalcula.
+    Con cid, aplica el cambio a esa cartera concreta, no a la activa."""
     if modo() == "demo":
         return jsonify(ok=False, errores=[AVISO_DEMO]), 403
     with cerrojo:
-        ruta = ruta_cartera()
+        ruta = ruta_cartera(cid)
         cfg = almacen.carga(ruta)
         try:
             item = fn(cfg)
         except almacen.ErrorValidacion as e:
             return jsonify(ok=False, errores=e.errores), 400
-        almacen.guarda(ruta, cfg, copias=ruta_copias())
-        datos = recalcula(descargar="faltan")
+        almacen.guarda(ruta, cfg, copias=ruta_copias(cid))
+        datos = recalcula(descargar="faltan", cid=cid)
     return jsonify(ok=True, item=item, cartera=cfg, avisos=(datos or {}).get("avisos", []))
 
 
@@ -466,7 +468,7 @@ def api_carteras_extraer():
 
 # ---------------------------------------------------------------- importar
 
-PLANES = {}   # vista previa pendiente de confirmar: {token: plan}
+PLANES = {}   # vista previa pendiente de confirmar: {token: {"cid": cid, "plan": plan}}
 
 
 @app.post("/api/importar/previsualizar")
@@ -498,21 +500,28 @@ def api_importar_previsualizar():
         informe = importar.vista_previa(cfg, plan)
     token = secrets.token_hex(8)
     PLANES.clear()   # solo una importación pendiente a la vez
-    PLANES[token] = plan
+    PLANES[token] = {"cid": _cid(), "plan": plan}
     return jsonify(ok=True, token=token, informe=informe)
 
 
 @app.post("/api/importar/confirmar")
 def api_importar_confirmar():
-    plan = PLANES.pop((request.get_json(silent=True) or {}).get("token"), None)
-    if plan is None:
+    entry = PLANES.pop((request.get_json(silent=True) or {}).get("token"), None)
+    if entry is None:
         return jsonify(ok=False, errores=["Esa vista previa ya no vale: vuelve a revisar el archivo."]), 400
+    plan = entry["plan"]
+    cid = entry["cid"]
+    # La cartera activa puede haber cambiado desde la vista previa: rechazar
+    # en lugar de importar contra la cartera equivocada.
+    if cid != _cid():
+        return jsonify(ok=False,
+                       errores=["La cartera activa ha cambiado: vuelve a revisar el archivo."]), 400
     informe = {}
 
     def fn(cfg):
         informe.update(importar.aplicar(cfg, plan))
         return None
-    respuesta = cambia(fn)
+    respuesta = cambia(fn, cid=cid)
     if isinstance(respuesta, tuple):
         return respuesta
     datos = respuesta.get_json()
@@ -548,14 +557,15 @@ def valida_copia(cfg):
     return cfg
 
 
-def restaura(cfg):
-    """Pone cfg como cartera. Lo que hubiera antes queda en las copias automáticas."""
+def restaura(cfg, cid=None):
+    """Pone cfg como cartera. Lo que hubiera antes queda en las copias automáticas.
+    Con cid, aplica a esa cartera concreta, no a la activa."""
     with cerrojo:
-        almacen.guarda(ruta_cartera(), cfg, copias=ruta_copias())
-        for viejo in (ruta_calculado(), ruta_historico()):
+        almacen.guarda(ruta_cartera(cid), cfg, copias=ruta_copias(cid))
+        for viejo in (ruta_calculado(cid), ruta_historico(cid)):
             if os.path.exists(viejo):
                 os.remove(viejo)
-        recalcula(descargar="faltan")
+        recalcula(descargar="faltan", cid=cid)
 
 
 @app.get("/api/copias")
