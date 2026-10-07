@@ -219,8 +219,12 @@ def api_actualizar():
 
 @app.get("/api/cartera")
 def api_cartera():
+    car = carteras.nombre(DATOS, _cid()) if modo() == "propio" else None
     return jsonify(modo=modo(), cartera=cartera(), tipos=motor.TIPOS, fuentes=motor.FUENTES,
-                   tiposMovimiento=almacen.TIPOS_MOV)
+                   tiposMovimiento=almacen.TIPOS_MOV,
+                   carteraActiva={"id": _cid(), "nombre": car} if modo() == "propio" else None,
+                   carteras=[{**c, "activa": c.get("id") == _cid()}
+                             for c in carteras.lista(DATOS)])
 
 
 @app.get("/api/buscar")
@@ -319,6 +323,90 @@ def api_empezar():
         carteras.activa_set(DATOS, creado["id"])
         recalcula(descargar="faltan")
     return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- catálogo de carteras
+
+def _cartera_de_url(cid):
+    """Valida un id venido de la URL: 400 si no es válido, 404 si no existe."""
+    if not carteras.id_valido(cid):
+        return jsonify(ok=False, errores=[f"El identificador «{cid}» no es válido."]), 400
+    if not carteras.existe(DATOS, cid):
+        return jsonify(ok=False, errores=[f"La cartera «{cid}» no existe."]), 404
+    return None
+
+
+@app.get("/api/carteras")
+def api_carteras():
+    """Solo metadata (los documentos pueden ser grandes)."""
+    activa = carteras.activa(DATOS)
+    return jsonify(ok=True, activa=activa,
+                   carteras=[{**c, "activa": c.get("id") == activa}
+                             for c in carteras.lista(DATOS)])
+
+
+@app.post("/api/carteras")
+def api_carteras_crear():
+    """Crea una cartera. No la activa (la UI lo pide explícitamente), salvo en
+    demo: la primera cartera sale activa y se deja la demo."""
+    datos = request.get_json(silent=True) or {}
+    with cerrojo:
+        era_demo = modo() == "demo"
+        try:
+            creado = carteras.crea(DATOS, datos.get("nombre"), desde=datos.get("desde"))
+        except carteras.ErrorCartera as e:
+            return jsonify(ok=False, errores=e.errores), 400
+        activa = carteras.activa(DATOS)
+        if era_demo:                 # primera cartera: activa y fuera de la demo
+            carteras.activa_set(DATOS, creado["id"])
+            recalcula(descargar="faltan")
+    return jsonify(ok=True, cartera=creado, activa=_cid(),
+                   carteras=[{**c, "activa": c.get("id") == activa}
+                             for c in carteras.lista(DATOS)])
+
+
+@app.post("/api/carteras/<cid>/activar")
+def api_carteras_activar(cid):
+    """Cambia la cartera activa; si tiene cálculo viejo, se recalcula al leer."""
+    mal = _cartera_de_url(cid)
+    if mal:
+        return mal
+    with cerrojo:
+        carteras.activa_set(DATOS, cid)
+        viejo = ruta_calculado(cid)
+        if os.path.exists(viejo):
+            os.remove(viejo)         # el cálculo derivado no se hereda
+    return jsonify(ok=True, activa=cid)
+
+
+@app.post("/api/carteras/<cid>/renombrar")
+def api_carteras_renombrar(cid):
+    """Cambia el nombre (índice y titular del documento)."""
+    mal = _cartera_de_url(cid)
+    if mal:
+        return mal
+    nombre = (request.get_json(silent=True) or {}).get("nombre")
+    if not ((nombre or "").strip()):
+        return jsonify(ok=False, errores=["Ponle un nombre a la cartera."]), 400
+    try:
+        carteras.renombra(DATOS, cid, nombre)
+    except carteras.ErrorCartera as e:
+        return jsonify(ok=False, errores=e.errores), 400
+    return jsonify(ok=True, nombre=carteras.nombre(DATOS, cid))
+
+
+@app.delete("/api/carteras/<cid>")
+def api_carteras_borrar(cid):
+    """Pasa la cartera a copias/<cid>/borrada_<sello>.json; no deja la última."""
+    mal = _cartera_de_url(cid)
+    if mal:
+        return mal
+    with cerrojo:
+        try:
+            carteras.borra(DATOS, cid, os.path.join(DATOS, "copias"))
+        except carteras.ErrorCartera as e:
+            return jsonify(ok=False, errores=e.errores), 400
+    return jsonify(ok=True, activa=_cid())
 
 
 # ---------------------------------------------------------------- importar

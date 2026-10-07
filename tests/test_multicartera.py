@@ -9,7 +9,7 @@ import json
 import os
 
 from app import carteras
-from tests.conftest import cartera_en_disco
+from tests.conftest import cartera_en_disco, cartera_en_disco_v2
 
 CARPETA_A = {
     "version": 1, "titular": "Cartera A",
@@ -146,3 +146,124 @@ def test_copias_cartera_activa(entorno):
     j = cliente.get("/api/copias").get_json()
     nombres = [c["archivo"] for c in j["copias"]]
     assert nombres == ["copia_beta.json"]
+
+
+# ---------------------------------------------------------------- catálogo HTTP
+
+def test_cred_renombrar_borrar(entorno):
+    """Crear, renombrar y borrar por HTTP: orden del índice y cartera activa."""
+    servidor, tmp_path = entorno
+    cartera_en_disco_v2(tmp_path, CARPETA_A, cid="alfa")
+    cliente = servidor.app.test_client()
+    h = {"X-Rumbo": "1"}
+
+    # Crear dos (la primera ya existe: alfa)
+    r = cliente.post("/api/carteras", json={"nombre": "Segunda", "desde": "vacia"}, headers=h)
+    assert r.status_code == 200
+    nueva = r.get_json()["cartera"]
+    # No se activa al crear
+    assert r.get_json()["activa"] == "alfa"
+    r = cliente.post("/api/carteras", json={"nombre": "Tercera"}, headers=h)
+    assert r.status_code == 200
+    otra = r.get_json()["cartera"]
+
+    # GET /api/carteras: solo metadata, en el orden del índice, con la activa
+    j = cliente.get("/api/carteras").get_json()
+    ids = [c["id"] for c in j["carteras"]]
+    assert ids == ["alfa", nueva["id"], otra["id"]]
+    assert j["activa"] == "alfa"
+    assert [c["activa"] for c in j["carteras"]] == [True, False, False]
+    assert set(j["carteras"][0]) == {"id", "nombre", "creada", "activa"}   # solo metadata
+
+    # Renombrar a una: cambia el índice y el titular
+    r = cliente.post(f"/api/carteras/{nueva['id']}/renombrar",
+                     json={"nombre": "Segunda (renombrada)"}, headers=h)
+    assert r.status_code == 200 and r.get_json()["ok"]
+    doc = json.load(open(carteras.ruta(tmp_path, nueva["id"]), encoding="utf-8"))
+    assert doc["titular"] == "Segunda (renombrada)"
+
+    # Borrar una que no es la activa: la activa no cambia
+    r = cliente.delete(f"/api/carteras/{otra['id']}", headers=h)
+    assert r.status_code == 200
+    assert r.get_json()["activa"] == "alfa"
+    j = cliente.get("/api/carteras").get_json()
+    assert [c["id"] for c in j["carteras"]] == ["alfa", nueva["id"]]
+    # La borrada pasó a copias/<cid>/
+    borradas = []
+    copia_dir = os.path.join(str(tmp_path), "copias", otra["id"])
+    if os.path.isdir(copia_dir):
+        borradas = [n for n in os.listdir(copia_dir) if n.startswith("borrada_")]
+    assert borradas and borradas[0].endswith(".json")
+
+
+def test_activar_por_http(entorno):
+    """Activar por HTTP: /api/cartera sirve los productos de la nueva activa;
+    escribir no toca la otra."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+
+    r = cliente.post("/api/carteras/beta/activar", headers={"X-Rumbo": "1"})
+    assert r.status_code == 200 and r.get_json()["activa"] == "beta"
+
+    j = cliente.get("/api/cartera").get_json()
+    assert j["cartera"]["productos"][0]["id"] == "prod_b"
+    assert j["carteraActiva"] == {"id": "beta", "nombre": "Cartera B"}
+    assert [c["activa"] for c in j["carteras"]] == [False, True]
+
+    # Escribir en la activa (beta): alfa no se toca
+    r = cliente.post("/api/productos",
+                     json={"nombre": "Nueva en beta", "tipo": "fondo", "fuente": "manual"},
+                     headers={"X-Rumbo": "1"})
+    assert r.status_code == 200
+    doc_alfa = json.load(open(carteras.ruta(tmp_path, "alfa"), encoding="utf-8"))
+    assert all(p["nombre"] != "Nueva en beta" for p in doc_alfa["productos"])
+
+
+def test_ids_de_url_se_validan(entorno):
+    """Todo id de URL se valida: 400 si no es legítimo, 404 si no existe,
+    y una URL con `..` nunca provoca un error de ruta (5xx)."""
+    servidor, tmp_path = entorno
+    _escribir_dos_carteras(tmp_path)
+    cliente = servidor.app.test_client()
+    h = {"X-Rumbo": "1"}
+    # URL trampa: o se valida o se normaliza; nunca un error de ruta
+    r = cliente.get("/api/carteras/../../etc/passwd/activar")
+    assert r.status_code in (200, 400, 404)      # nunca un 5xx
+    # Id inválido (mayúsculas) → 400 con mensaje en español
+    r = cliente.post("/api/carteras/MAYUSCULA/activar", headers=h)
+    assert r.status_code == 400
+    assert r.get_json()["ok"] is False
+    # Id legítimo pero inexistente → 404
+    r = cliente.delete("/api/carteras/no_existe", headers=h)
+    assert r.status_code == 404
+    assert r.get_json()["ok"] is False
+
+
+def test_no_se_puede_borrar_la_ultima(entorno):
+    """Borrar la única cartera → 400."""
+    servidor, tmp_path = entorno
+    cartera_en_disco_v2(tmp_path, CARPETA_A, cid="solo")
+    cliente = servidor.app.test_client()
+    r = cliente.delete("/api/carteras/solo", headers={"X-Rumbo": "1"})
+    assert r.status_code == 400
+    assert r.get_json()["ok"] is False
+    assert os.path.exists(carteras.ruta(tmp_path, "solo"))
+
+
+def test_crear_en_demo_sale_de_la_demo(entorno):
+    """En modo demo, crear la primera cartera la activa y deja el modo demo."""
+    servidor, tmp_path = entorno
+    cliente = servidor.app.test_client()
+    h = {"X-Rumbo": "1"}
+    assert cliente.get("/api/cartera").get_json()["modo"] == "demo"
+
+    r = cliente.post("/api/carteras", json={"nombre": "La mía", "desde": "vacia"}, headers=h)
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j["activa"] == j["cartera"]["id"]
+
+    j = cliente.get("/api/cartera").get_json()
+    assert j["modo"] == "propio"
+    assert j["carteraActiva"]["nombre"] == "La mía"
+    assert j["carteras"][0]["activa"] is True
