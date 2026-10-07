@@ -24,6 +24,12 @@ Resumen de las mejoras añadidas después de la versión 1.1, escrito para el us
 - **Si importaste con una versión anterior, importa de nuevo cada fondo una vez**: así se corrigen las participaciones antiguas y cualquier venta fantasma.
 - Los totales de la vista previa de importación y la asignación de la tarjeta de importación a su cartera están corregidos.
 
+## Corregido: formularios de cartera
+
+- Al crear una cartera o al extraer productos, el formulario pedía el nombre aunque lo hubieras escrito: los campos se dibujaban con `name` pero el código los buscaba por `id`, así que leía siempre un valor vacío.
+- El selector «Origen» (vacía / copia de otra cartera / copia del ejemplo) se ignoraba por el mismo motivo y creaba una cartera vacía.
+- Arreglado: los campos ya llevan su `id`, y un test comprueba que cada `$("#id")` del editor tiene su elemento, para que no vuelva a pasar.
+
 ## Interno (tests)
 
 - Suite de tests completa en `tests/`: seguridad (escape y cabeceras), importación MyInvestor, migración de datos, aislamiento entre carteras y flujo HTTP completo. Se ejecuta sin red y en segundos.
