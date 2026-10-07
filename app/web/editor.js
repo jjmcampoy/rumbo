@@ -16,6 +16,7 @@
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const eur = v => v == null ? "—" : Number(v).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
   const num = (v, d = 4) => v == null ? "—" : Number(v).toLocaleString("es-ES", { maximumFractionDigits: d });
+  const pct = v => v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toLocaleString("es-ES", { maximumFractionDigits: 2 }) + " %";
   const fecha = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "—";
   const hoy = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
   const leeNum = t => {
@@ -818,6 +819,15 @@
 
   /* ---------------------------------------------- carteras */
   const CAR = { lista: null };
+  const RES = {
+    j: null,
+    async cargar() {
+      try { RES.j = await api("GET", "api/carteras/resumen"); }
+      catch (e) { RES.j = { ok: false, error: e.message }; }
+      pinta();
+    },
+    recalcular() { RES.j = null; RES.cargar(); },
+  };
 
   async function cargaCarteras(force) {
     const j = await api("GET", "api/carteras");
@@ -826,6 +836,7 @@
   }
   function conectaCarteras() {
     if (CAR.lista === null) cargaCarteras(true);
+    if (RES.j === null) RES.cargar();
   }
 
   function vistaCarteras() {
@@ -878,9 +889,40 @@
             <label class="radioFila"><input type="radio" name="cExtraerModo" value="mover"> Mover (los quita de aquí)</label></label>
         </div>
         <button class="btn prim" data-acc="extraerCartera" style="margin-top:12px">Extraer</button>`
-        : '<p class="subt">No hay productos en tu cartera actual que extraer.</p>'}</section>`;
+        : '<p class="subt">No hay productos en tu cartera actual que extraer.</p>'}</section>
+      ${seccionComparar()}`;
     }
     return contenido;
+  }
+
+  /* Comparar carteras: ¿cuál ha hecho más dinero? Lee api/carteras/resumen. */
+  function seccionComparar() {
+    const j = RES.j;
+    let cuerpo;
+    if (j === null) {
+      cuerpo = '<p class="cargando">Cargando resumen…</p>';
+    } else if (!j.ok) {
+      cuerpo = `<div class="av"><span>⚠</span><span>No he podido cargar la comparación: ${esc(j.error || "sin detalles")}</span></div>`;
+    } else {
+      const filas = (j.carteras || []).map(c => `
+        <tr${c.activa ? ' class="destacada"' : ""}>
+          <td style="text-align:left"><b>${esc(c.nombre)}</b>${c.activa ? ' <span class="estado">activa</span>' : ""}</td>
+          <td>${eur(c.patrimonio)}</td><td>${eur(c.aportado)}</td><td>${eur(c.plusvalia)}</td>
+          <td>${pct(c.rentabilidad)}</td><td>${pct(c.tir)}</td><td>${c.nProductos == null ? "—" : c.nProductos}</td>
+          <td class="acc">${c.id !== E.activa ? '<button data-acc="activarCartera" data-id="' + esc(c.id) + '">Activar</button>' : ""}</td></tr>`).join("");
+      const t = j.total || {};
+      cuerpo = `<div class="tablaEnv"><table class="dt"><thead><tr>
+          <th style="text-align:left">Cartera</th><th>Valor</th><th>Aportado</th><th>Plusvalía</th>
+          <th>Rentabilidad</th><th>TIR</th><th>Productos</th><th></th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="8">Todavía no hay carteras.</td></tr>'}</tbody>
+        <tfoot><tr><td style="text-align:left"><b>TOTAL</b></td>
+          <td><b>${eur(t.patrimonio)}</b></td><td><b>${eur(t.aportado)}</b></td><td><b>${eur(t.plusvalia)}</b></td>
+          <td><b>${pct(t.rentabilidad)}</b></td><td><b>${pct(t.tir)}</b></td><td></td><td></td></tr></tfoot></table></div>`;
+    }
+    return `<section class="tarjeta"><header><h2>Comparar</h2>
+      <span class="subt">¿Qué cartera ha hecho más dinero?</span>
+      <span class="sp"></span><button class="btn" data-acc="recalcularComparar">Recalcular</button></header>
+    ${cuerpo}</section>`;
   }
 
   async function activarCartera(id) {
@@ -1008,6 +1050,7 @@
     subirCopia,
     recuperarCopia,
     activarCartera: soloPropio(activarCartera),
+    recalcularComparar: () => RES.recalcular(),
     renombrarCartera: soloPropio(renombrarCartera),
     duplicarCartera: soloPropio(duplicarCartera),
     borrarCartera: soloPropio(borrarCartera),

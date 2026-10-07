@@ -12,6 +12,8 @@ def test_marcado_ui():
     editor = open(os.path.join(WEB, "editor.js"), encoding="utf-8").read()
     for aguja in ("api/carteras", "carteras/extraer", "activar", "__nueva__"):
         assert aguja in editor, aguja
+    # la llamada real: una sola cuerda o un comentario no pueden satisfacerla
+    assert 'api("GET", "api/carteras/resumen")' in editor
 
 
 def test_estatico_no_muestra_selector():
