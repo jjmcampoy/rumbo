@@ -42,6 +42,63 @@ def test_construir_con_cache_sembrada(tmp_path, monkeypatch):
     assert abs(datos["total"]["patrimonio"] - 10 * max(serie.values())) < 0.01
 
 
+def test_traspaso_no_fabrica_perdida_en_la_rentabilidad_anual(tmp_path, monkeypatch):
+    """Un traspaso (importe mayor que el valor de mercado de sus unidades) no debe
+    hacer bajar la rentabilidad por año del producto: el índice usa el valor de
+    mercado de lo recibido, no el importe fiscal del origen."""
+    serie = {}
+    f = dt.date(2024, 1, 1)
+    while f <= dt.date(2025, 12, 31):
+        if f.weekday() < 5:
+            serie[f.isoformat()] = 10.0
+        f += dt.timedelta(days=1)
+    escribe_cache(tmp_path, "FONDO", serie)
+    _descarga_de_la_cache(monkeypatch, tmp_path)
+
+    cfg = {
+        "version": 1, "titular": "Prueba",
+        "productos": [{"id": "fondo", "nombre": "Fondo", "corto": "F", "tipo": "fondo",
+                        "fuente": "yahoo", "codigo": "FONDO", "moneda": "EUR", "slot": 1,
+                        "largoPlazo": True, "grupo": "Prueba"}],
+        "movimientos": [
+            # El importe (1.000) es mayor que lo que valían esas 50 unidades ese
+            # dia (500): como un traspaso, su coste fiscal es el del fondo origen.
+            {"id": "m1", "fecha": "2024-01-02", "producto": "fondo",
+             "tipo": "compra", "unidades": 50, "importe": 1000.0},
+            # Compras normales, con importe igual al valor de mercado.
+            {"id": "m2", "fecha": "2024-02-01", "producto": "fondo",
+             "tipo": "compra", "unidades": 50, "importe": 500.0},
+            {"id": "m3", "fecha": "2025-02-03", "producto": "fondo",
+             "tipo": "compra", "unidades": 50, "importe": 500.0},
+        ],
+        "valoraciones": [],
+        "comparador": [{"id": "real", "nombre": "Mi cartera real", "real": True}],
+    }
+
+    datos = motor.construir(cfg, str(tmp_path), descargar=False)
+
+    ra = datos["rentabilidadAnual"]
+    assert ra["anos"][0] == "2024"
+    # El índice de cartera es la serie que dibuja el gráfico: en cartera de un
+    # solo fondo debe coincidir con la de su producto.
+    assert abs(ra["cartera"][0] - ra["porProducto"]["fondo"][0]) < 0.02, \
+        "cartera y producto no coinciden en cartera de un solo fondo"
+    rent_cartera = ra["cartera"][0]
+    assert rent_cartera is not None
+    assert abs(rent_cartera) < 0.02
+    rent_2024 = ra["porProducto"]["fondo"][0]
+    # El precio no varió: el primer año debe dar ~0 %, no ~-33 % como si el
+    # sobreimporte del traspaso entrara en el índice como pérdida de mercado.
+    assert rent_2024 is not None
+    assert abs(rent_2024) < 0.02
+    # Las cifras fiscales no cambian: el coste fiscal sigue contando el importe.
+    prod = next(p for p in datos["productos"] if p["id"] == "fondo")
+    assert prod["aportado"] == 2000.0
+    assert prod["serieAportado"][-1] == 2000.0
+    assert abs(prod["realizado"]) < 0.01
+    assert [x[1] for x in prod["flujos"]] == [-1000.0, -500.0, -500.0]
+
+
 def test_fifo_al_vender_calcula_la_plusvalia_realizada():
     producto = {"id": "accion", "corto": "Acción"}
     movs = [{"fecha": "2024-01-02", "tipo": "compra", "unidades": 10, "importe": 1000.0},

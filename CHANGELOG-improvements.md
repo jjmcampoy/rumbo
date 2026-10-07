@@ -32,6 +32,11 @@ Resumen de las mejoras añadidas después de la versión 1.1, escrito para el us
 - Los selectores segmentados («Distribución», «Rango», «Vista», la tabla y la serie) ahora marcan claramente la opción elegida y siguen al clic: antes el resaltado se quedaba en la opción con la que se había cargado la pestaña —y la opción activa se pintaba además con el propio color de la tarjeta, así que parecía un hueco— y no había forma de saber qué estaba seleccionado.
 - El anillo de «Distribución» vuelve a dibujarse cuando solo hay un valor (un producto, o un único grupo/entidad/tipo): antes el centro mostraba el total pero el anillo salía vacío.
 
+## Corregido: rentabilidad
+
+- La rentabilidad por año natural ya no inventa pérdidas en los años en los que entró dinero de un traspaso: lo que entra se valora por el **valor de mercado de las participaciones recibidas**, no por el coste fiscal heredado del fondo de origen. En una cartera real, 2022 pasa de −64,5 % a −9,2 %, que es la rentabilidad que de verdad hizo el fondo en ese periodo.
+- El resto de cifras no cambia: lo aportado, la plusvalía y la TIR siguen calculándose sobre el coste fiscal del extracto.
+
 ## Interno (tests)
 
 - Suite de tests completa en `tests/`: seguridad (escape y cabeceras), importación MyInvestor, migración de datos, aislamiento entre carteras y flujo HTTP completo. Se ejecuta sin red y en segundos.

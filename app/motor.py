@@ -468,24 +468,29 @@ def clave_serie(p):
     return {"morningstar": "MS:", "coingecko": "CG:"}.get(p.get("fuente"), "") + (p.get("codigo") or "")
 
 
-def aplicar_movimientos(p, movs):
+def aplicar_movimientos(p, movs, serie=None):
     """
     Recorre los movimientos de un producto por fecha. Las ventas descuentan el coste
     por FIFO (primero lo mas antiguo), como hace Hacienda: el coste de lo vendido sale
     de "aportado" y la diferencia con lo cobrado es plusvalia realizada.
 
-    Devuelve eventos (fecha, +-unidades, +-aportado) para las series diarias y flujos
-    (fecha, importe) para la TIR, en negativo lo que sale de tu cuenta.
+    Devuelve eventos (fecha, +-unidades, +-aportado) para las series diarias, flujos
+    (fecha, importe) para la TIR, en negativo lo que sale de tu cuenta, y
+    flujos_perf: la misma serie para el indice de rendimiento, donde un traspaso
+    se anota con el valor de mercado de sus unidades ese dia (unidades x precio de
+    'serie'), no con su importe fiscal; si no hay precio esa fecha, usa el importe.
     """
-    lotes, eventos, flujos, vendidas = [], [], [], set()
+    lotes, eventos, flujos, flujos_perf, vendidas = [], [], [], [], set()
     realizado = comisiones = 0.0
     for m in sorted(movs, key=lambda x: (x["fecha"], ORDEN_TIPO.get(x.get("tipo"), 9))):
         f, t = m["fecha"], m.get("tipo")
         u, imp = float(m.get("unidades") or 0), float(m.get("importe") or 0)
+        vm = valor_en(serie, f) if serie else None
         if t == "compra":
             lotes.append([u, imp, id(m)])
             eventos.append((f, u, imp))
             flujos.append((f, -imp))
+            flujos_perf.append((f, -u * vm if vm else -imp))
             comisiones += float(m.get("comision") or 0)
         elif t == "venta":
             quedan, coste = u, 0.0
@@ -503,16 +508,20 @@ def aplicar_movimientos(p, movs):
                 aviso(f"{p['corto']}: el {f} vendes más unidades de las que tienes. Revisa sus movimientos.")
             realizado += imp - coste
             eventos.append((f, -(u - quedan), -coste))
+            v_perf = u * vm if vm else imp
             flujos.append((f, imp))
+            flujos_perf.append((f, v_perf))
         elif t == "dividendo":
             realizado += imp
             flujos.append((f, imp))
+            flujos_perf.append((f, imp))
         elif t == "comision":
             realizado -= imp
             comisiones += imp
             flujos.append((f, -imp))
-    return {"eventos": eventos, "flujos": flujos, "realizado": realizado, "comisiones": comisiones,
-            "vendidas": vendidas}
+            flujos_perf.append((f, -imp))
+    return {"eventos": eventos, "flujos": flujos, "flujos_perf": flujos_perf,
+            "realizado": realizado, "comisiones": comisiones, "vendidas": vendidas}
 
 
 def descarga_series(productos_cfg, series=None):
@@ -644,11 +653,11 @@ def construir(cfg, carpeta, descargar=True, historico=None):
             primera = d(snaps[0][0]) if primera is None else min(primera, d(snaps[0][0]))
             continue
 
-        mv = aplicar_movimientos(p, movs)
-        p["realizado"] = round(mv["realizado"], 2)
-        p["_mv"] = mv
         cotiza = p["fuente"] != "manual"
         serie = precio_eur(p, series) if cotiza else {}
+        mv = aplicar_movimientos(p, movs, serie if serie else None)
+        p["realizado"] = round(mv["realizado"], 2)
+        p["_mv"] = mv
         if cotiza and not serie:
             if snaps:
                 aviso(f"{p['corto']}: no encuentro su precio en {p['fuentePrecio']}; "
@@ -1026,6 +1035,11 @@ def construir(cfg, carpeta, descargar=True, historico=None):
     flujo_dia = [0.0] * n
     flujo_prod = {p["id"]: [0.0] * n for p in productos}
     flujo_inv = [0.0] * n
+    # Serie de flujos SOLO para el indice de rendimiento: un traspaso entra por el
+    # valor de mercado de sus unidades (ya calculado al aplicar los movimientos),
+    # no por su importe fiscal, para no fabricar un mercado que no hubo.
+    flujo_perf_prod = {p["id"]: [0.0] * n for p in productos}
+    flujo_perf_inv = [0.0] * n
     ids_inv = {p["id"] for p in inv}
     for p in productos:
         # Dinero que entra en el producto: compras y comisiones suman; ventas y
@@ -1038,6 +1052,13 @@ def construir(cfg, carpeta, descargar=True, historico=None):
             flujo_prod[p["id"]][i] -= v
             if p["id"] in ids_inv:
                 flujo_inv[i] -= v
+        for f, v in p["_mv"]["flujos_perf"]:
+            i = idx_fecha.get(f)
+            if i is None:
+                continue
+            flujo_perf_prod[p["id"]][i] -= v
+            if p["id"] in ids_inv:
+                flujo_perf_inv[i] -= v
 
     serie_inv = [0.0] * n
     for p in inv:
@@ -1068,7 +1089,7 @@ def construir(cfg, carpeta, descargar=True, historico=None):
             ant = v
         return out
 
-    idx_cartera = indice_twr(serie_inv, flujo_inv)
+    idx_cartera = indice_twr(serie_inv, flujo_perf_inv)
 
     def indice_pesos(pesos):
         """Compra y mantener con pesos fijos, base 100."""
@@ -1152,7 +1173,10 @@ def construir(cfg, carpeta, descargar=True, historico=None):
     # precio real que pagaste (con comisiones) y sin que cuente cuando metiste cada
     # euro. En un ano completo coincide con la publicada del fondo; el primer ano
     # cuenta desde tu primera compra.
-    idx_prod = {p["id"]: indice_twr(p["serie"], flujo_prod[p["id"]]) for p in inv}
+    # Solo el indice por producto usa los flujos "de rendimiento": el importe
+    # fiscal de un traspaso no es dinero que entrase, y cargarlo fabricaba
+    # perdidas de mercado que no existieron (el resto sigue usando flujos reales).
+    idx_prod = {p["id"]: indice_twr(p["serie"], flujo_perf_prod[p["id"]]) for p in inv}
     anos_nat = sorted({f[:4] for f in eje_iso})
     rent_anual = {"anos": anos_nat, "cartera": [], "parcial": [],
                   "porProducto": {p["id"]: [] for p in inv},
