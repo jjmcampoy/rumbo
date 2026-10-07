@@ -2,14 +2,14 @@
 """Límites de subida e importación (F-10)."""
 import io
 
-from tests.conftest import cartera_en_disco
+from tests.conftest import cartera_en_disco_v2
 
 CAB = {"X-Rumbo": "1"}   # inofensivo antes de T-16, obligatorio después
 
 
 def test_demasiados_archivos(cliente, entorno):
     servidor, tmp_path = entorno
-    cartera_en_disco(tmp_path)   # fuera de la demo: la importación está permitida
+    cartera_en_disco_v2(tmp_path)   # fuera de la demo: la importación está permitida
     datos = {"origen": "plantilla"}
     datos["archivos"] = [(io.BytesIO(b"a;b\n1;2\n"), f"f{i}.csv") for i in range(51)]
     r = cliente.post("/api/importar/previsualizar", data=datos,
@@ -19,7 +19,7 @@ def test_demasiados_archivos(cliente, entorno):
 
 def test_csv_pequeno_no_se_rechaza(cliente, entorno):
     servidor, tmp_path = entorno
-    cartera_en_disco(tmp_path)   # fuera de la demo: la importación está permitida
+    cartera_en_disco_v2(tmp_path)   # fuera de la demo: la importación está permitida
     datos = {"origen": "plantilla"}
     datos["archivos"] = [(io.BytesIO(b"a;b\n1;2\n"), "pequeno.csv")]
     r = cliente.post("/api/importar/previsualizar", data=datos,

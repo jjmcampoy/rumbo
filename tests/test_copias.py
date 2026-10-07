@@ -8,7 +8,7 @@ import os
 import stat
 
 from app import almacen
-from tests.conftest import CARTERA_MINIMA, cartera_en_disco, _jsons_de_datos
+from tests.conftest import CARTERA_MINIMA, cartera_en_disco_v2, _jsons_de_datos
 
 
 def _copia():
@@ -59,28 +59,28 @@ def test_nombre_con_html_se_guarda_sin_error():
 
 def test_subir_copia_valida_sustituye_la_cartera(cliente, entorno):
     servidor, tmp_path = entorno
-    cartera_en_disco(tmp_path)
+    cartera_en_disco_v2(tmp_path)
     cuerpo = json.dumps(CARTERA_MINIMA).encode("utf-8")
     r = cliente.post("/api/copia/subir",
                      data={"archivo": (io.BytesIO(cuerpo), "copia.json")},
                      content_type="multipart/form-data", headers={"X-Rumbo": "1"})
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
-    cfg = json.load(open(servidor.DATOS + "/cartera.json", encoding="utf-8"))
+    cfg = json.load(open(servidor.ruta_cartera(), encoding="utf-8"))
     assert cfg["titular"] == "Prueba"
 
 
 def test_subir_copia_mala_no_toca_la_cartera(cliente, entorno):
     servidor, tmp_path = entorno
-    cartera_en_disco(tmp_path)
-    antes = json.load(open(servidor.DATOS + "/cartera.json", encoding="utf-8"))
+    cartera_en_disco_v2(tmp_path)
+    antes = json.load(open(servidor.ruta_cartera(), encoding="utf-8"))
     cuerpo = json.dumps({"productos": [], "movimientos": "no"}).encode("utf-8")
     r = cliente.post("/api/copia/subir",
                      data={"archivo": (io.BytesIO(cuerpo), "copia.json")},
                      content_type="multipart/form-data", headers={"X-Rumbo": "1"})
     assert r.status_code == 400
     assert r.get_json()["ok"] is False
-    ahora = json.load(open(servidor.DATOS + "/cartera.json", encoding="utf-8"))
+    ahora = json.load(open(servidor.ruta_cartera(), encoding="utf-8"))
     assert ahora == antes
 
 

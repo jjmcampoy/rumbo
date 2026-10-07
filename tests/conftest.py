@@ -72,6 +72,23 @@ def cartera_en_disco(datos_dir, datos=None):
     escribe_json(ruta, datos or CARTERA_MINIMA)
     return ruta
 
+
+def cartera_en_disco_v2(datos_dir, datos=None, cid="principal"):
+    """Escribe la cartera en el layout multicartera (carteras/indice.json +
+    carteras/<cid>.json) y devuelve la ruta del documento."""
+    import json as _json
+    from app import carteras
+    ruta_carts = carteras.ruta_carteras(datos_dir)
+    os.makedirs(ruta_carts, exist_ok=True)
+    indice = {"version": 1, "activa": cid,
+              "carteras": [{"id": cid, "nombre": "Prueba",
+                            "creada": "2024-01-01T00:00:00"}]}
+    escribe_json(carteras.ruta_indice(datos_dir), indice)
+    ruta_doc = carteras.ruta(datos_dir, cid)
+    with open(ruta_doc, "w", encoding="utf-8") as f:
+        _json.dump(datos or CARTERA_MINIMA, f, ensure_ascii=False, indent=1)
+    return ruta_doc
+
 def _jsons_de_datos(datos_dir):
     """Todos los *.json bajo la carpeta de datos, en cualquier profundidad."""
     for raiz, _dirs, nombres in os.walk(str(datos_dir)):

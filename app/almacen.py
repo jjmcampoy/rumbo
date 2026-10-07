@@ -99,10 +99,13 @@ def carga(ruta):
         return json.load(f)
 
 
-def guarda(ruta, cfg):
-    """Copia de seguridad automática de lo que había y escritura atómica de lo nuevo."""
+def guarda(ruta, cfg, copias=None):
+    """Copia de seguridad automática de lo que había y escritura atómica de lo nuevo.
+
+    `copias` (opcional) indica dónde guardar las copias automáticas; por defecto
+    siguen saliendo en `carpeta/copias`, como antes."""
     carpeta = os.path.dirname(ruta)
-    copias = os.path.join(carpeta, "copias")
+    copias = copias or os.path.join(carpeta, "copias")
     if os.path.exists(ruta):
         os.makedirs(copias, mode=0o700, exist_ok=True)
         sello = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
