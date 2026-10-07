@@ -41,6 +41,7 @@ Herramienta **gratuita** hecha por **Dani Dominguez Quant**. Si te resulta útil
 
 ## Qué hace
 
+- **Varias carteras**: crea, renombra y borra carteras, cambia de una a otra con el selector, muévelas o cópialas entre sí y compáralas lado a lado.
 - **Todo tipo de productos**: fondos, ETF, acciones, cripto, materias primas, bonos, planes de pensiones, cuentas, inmuebles, deudas…
 - **Precios automáticos** de Morningstar, Yahoo Finance y CoinGecko, con conversión a euros.
 - **Buscador por ISIN, ticker o nombre** que comprueba que el producto tiene precio antes de guardarlo y rellena solo la comisión (TER), el riesgo y la categoría.
@@ -179,6 +180,8 @@ Las ventas descuentan el coste por **FIFO** (primero lo más antiguo), como hace
 
 Si el fondo no existe todavía, se crea solo. Cada importación **sustituye** lo que importaste antes de ese fondo, así que puedes repetirlo cada mes sin duplicar nada.
 
+El CSV de «Plusvalías y minusvalías» trae solo cuatro columnas —`Fecha fiscal;Inversión;Valor de mercado;Resultado fiscal`— y **no trae las participaciones del fondo**, así que la app las calcula: **inversión dividida por el VL de la fecha fiscal**; si el lote llegó por un **traspaso** (no tienes dinero invertido en él), usa el **valor de mercado** del extracto. Por eso, después de actualizar la app (o la versión de la importación), importa de nuevo **cada fondo** una vez: así se corrigen las participaciones guardadas con fórmulas antiguas y cualquier venta fantasma. El beneficio fiscal declarado por los lotes ya vendidos (`Resultado fiscal`) se te **muestra al importar**, pero **no entra en el panel**.
+
 MyInvestor no permite descargar las órdenes de **ETF o acciones**: haz capturas de pantalla de tus órdenes y usa la opción **«Con ayuda de una IA»**.
 
 ### Plantilla de Excel o CSV (cualquier banco)
@@ -248,6 +251,7 @@ EXTRACTO:
 - **Actualizar precios**: la app los actualiza sola al abrirse (si tienen más de 6 horas) y con el botón **«↻ Actualizar precios»**. En la ficha de cada producto verás de dónde sale su precio y de qué día es.
 - **Tu rutina mensual**: descarga los CSV de MyInvestor y arrástralos, anota tus compras de bolsa y pulsa **«Anotar todos de una vez»** con los saldos de tus cuentas. Cinco minutos.
 - **Solo largo plazo**: el botón del panel quita lo que no es inversión (tu colchón, las cuentas…) y recalcula todas las cifras. Cada producto tiene su interruptor «Inversión a largo plazo».
+- **Cambiar de cartera**: en la cabecera aparece el selector cuando tienes más de una; desde **«Carteras»** puedes crear, renombrar y borrar carteras y mover o copiar productos de una a otra. El comparador las muestra lado a lado.
 - **Modo vídeo** (tecla `V`): esconde los controles y agranda las cifras. Las teclas `1` a `6` cambian de pestaña.
 - **Tema claro u oscuro** con el botón **«Tema»**.
 
@@ -347,11 +351,12 @@ El diseño es local y de un solo usuario: **la app no tiene autenticación y no 
 
 - Los precios vienen de servicios **gratuitos y no oficiales**. Casi siempre van bien, pero pueden fallar o traer algún dato raro. Si una fuente no responde, la app usa el último precio guardado y te avisa.
 - Del CSV de MyInvestor solo se conoce la **plusvalía** de lo ya vendido, no la fecha de venta: tu patrimonio de hoy sale bien, pero la curva no refleja cuándo vendiste.
+- Las plusvalías ya materializadas: el beneficio fiscal de los lotes vendidos (`Resultado fiscal`) aparece solo en el aviso de la importación, **no entra en «plusvalía ya materializada»** del panel.
+- **Traspasos**: para el lote que llegó por traspaso, el valor y la ganancia son exactos, pero **la curva antes del traspaso se dibuja con el VL del fondo de destino** (el archivo no trae la fecha del traspaso). Por eso la `rentabilidad` de ese fondo incluye lo que el dinero ganó en el fondo anterior — la realidad fiscal (subrogación) es otra cosa.
 - No calcula **impuestos**.
 - La versión de **Mac** no se ha podido probar en un Mac real.
-- Es de **un solo usuario**: no hay cuentas ni autenticación, y no debe exponerse a internet (ver [SECURITY.md](SECURITY.md)).
+- Es de **un solo usuario**: no hay cuentas ni autenticación, y no debe exponerse a internet; si la abres desde tu red, ponla detrás de un proxy autenticado y configura `RUMBO_HOSTS` (ver [SECURITY.md](SECURITY.md)).
 - Los datos de `mis_datos` **no están cifrados** en disco.
-- No hay **multi-cartera** hasta la versión 1.2: una sola cartera por instalación.
 
 ---
 
