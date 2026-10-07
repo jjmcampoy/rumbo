@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, has_request_context, jsonify, request, send_from_directory
 from werkzeug.serving import make_server
 
 from . import almacen, buscar, carteras, exportar, importar, motor, plantilla
@@ -122,7 +122,17 @@ def escribe_json(ruta, datos):
 
 
 def _cid():
-    """El id de la cartera activa (o el defecto si no hay índice)."""
+    """El id de la cartera activa, o la que pida esta petición (X-Rumbo-Cartera / ?cartera=).
+
+    El anclaje es opcional: sin él todo funciona como siempre. Se ignora cualquier
+    valor inválido o desconocido, en vez de dar error, y solo se mira la petición si
+    de verdad hay una: `main()` recorre estas rutas al arrancar, sin contexto de Flask.
+    """
+    fuente = None
+    if has_request_context():
+        fuente = request.headers.get("X-Rumbo-Cartera") or request.args.get("cartera")
+    if fuente and carteras.id_valido(fuente) and carteras.existe(DATOS, fuente):
+        return fuente
     return carteras.activa(DATOS) or carteras.ID_DEFECTO
 
 

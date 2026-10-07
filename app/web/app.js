@@ -12,6 +12,14 @@
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  // Cartera anclada a esta pestana (?cartera=<id>): se lee una sola vez al cargar y
+  // se anade a las llamadas a la API. Sin el parametro no se envia nada y todo
+  // funciona igual que siempre.
+  const pinCartera = new URLSearchParams(location.search).get("cartera") || "";
+  const conPin = url => pinCartera
+    ? url + (url.indexOf("?") < 0 ? "?" : "&") + "cartera=" + encodeURIComponent(pinCartera)
+    : url;
+
   const recuerda = {
     lee(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     guarda(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* da igual */ } },
@@ -1052,7 +1060,7 @@
   /* ---------------------------------------------- bitcoin en vivo */
   async function traeBtc() {
     try {
-      const r = await fetch("api/vivo", { cache: "no-store" });
+      const r = await fetch(conPin("api/vivo"), { cache: "no-store" });
       if (!r.ok) return null;
       const j = await r.json();
       return (j && j.ok && isFinite(j.precio)) ? j.precio : null;
@@ -1105,7 +1113,7 @@
     b.disabled = true;
     b.textContent = "↻ Actualizando…";
     try {
-      const r = await fetch("api/actualizar", { method: "POST", headers: { "X-Rumbo": "1" } });
+      const r = await fetch(conPin("api/actualizar"), { method: "POST", headers: { "X-Rumbo": "1" } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
       location.reload();

@@ -598,3 +598,67 @@ def test_instalacion_limpia_no_crea_nada(cliente, entorno):
     r = cliente.get("/api/cartera")
     assert r.get_json()["modo"] == "demo"
     assert os.listdir(tmp_path) == [], os.listdir(tmp_path)
+
+
+# ---------------------------------------------------------------- cartera anclada (T-51)
+
+def _calculado(tmp_path, cid, titular, patrimonio):
+    """Cálculo guardado, mínimo y distinguible, para una cartera."""
+    escribe_json(os.path.join(tmp_path, "calculado", cid + ".json"),
+                 {"generado": "2024-06-30T12:00:00", "fechaExtracto": "2024-06-30",
+                  "titular": titular, "productos": [],
+                  "total": {"patrimonio": patrimonio, "aportado": patrimonio,
+                            "plusvalia": 0.0, "rentabilidad": 0.0, "tir": None}})
+
+
+def test_anclaje_de_cartera_por_peticion(cliente, entorno):
+    """?cartera= y X-Rumbo-Cartera eligen la cartera de ESTA petición sin cambiar la activa."""
+    servidor, tmp_path = entorno
+    _dos_carteras(tmp_path)                       # la activa es «a»
+    _calculado(tmp_path, "a", "Cartera A", 100.0)
+    _calculado(tmp_path, "b", "Cartera B", 200.0)
+
+    # Sin anclaje, todo igual que siempre: manda la activa.
+    assert "Cartera A" in cliente.get("/datos.js").get_data(as_text=True)
+
+    # Con ?cartera=b esta petición sirve la otra cartera...
+    assert "Cartera B" in cliente.get("/datos.js?cartera=b").get_data(as_text=True)
+    # ...y la activa no se ha tocado.
+    assert servidor.carteras.activa(servidor.DATOS) == "a"
+
+    # La cabecera es el otro canal y hace exactamente lo mismo.
+    r = cliente.get("/datos.js", headers={"X-Rumbo-Cartera": "b"})
+    assert r.status_code == 200
+    assert "Cartera B" in r.get_data(as_text=True)
+
+    # El anclaje llega también a las rutas de datos.
+    j = cliente.get("/api/cartera?cartera=b").get_json()
+    assert j["cartera"]["titular"] == "Cartera B"
+    assert j["carteraActiva"]["id"] == "b"
+    assert cliente.get("/api/cartera").get_json()["cartera"]["titular"] == "Cartera A"
+    assert servidor.carteras.activa(servidor.DATOS) == "a"
+
+
+def test_anclaje_invalido_o_desconocido_cae_a_la_activa(cliente, entorno):
+    """Un id inválido o inexistente se ignora: se sirve la activa y nunca hay error."""
+    servidor, tmp_path = entorno
+    _dos_carteras(tmp_path)
+    _calculado(tmp_path, "a", "Cartera A", 100.0)
+    _calculado(tmp_path, "b", "Cartera B", 200.0)
+
+    for malo in ("../../etc/passwd", "no_existe", "MAYUS", "a" * 31, ""):
+        r = cliente.get("/datos.js", query_string={"cartera": malo})
+        assert r.status_code == 200, malo
+        assert "Cartera A" in r.get_data(as_text=True), malo
+        assert servidor.carteras.activa(servidor.DATOS) == "a"
+
+
+def test_anclaje_no_salta_la_guardia_csrf(cliente, entorno):
+    """Anclar la cartera no exime de la cabecera CSRF de T-16."""
+    servidor, tmp_path = entorno
+    _dos_carteras(tmp_path)
+    assert cliente.post("/api/carteras/b/activar?cartera=b").status_code == 403
+    assert cliente.post("/api/carteras/b/activar",
+                        headers={"X-Rumbo-Cartera": "b"}).status_code == 403
+    # Y la activa sigue siendo la de antes.
+    assert servidor.carteras.activa(servidor.DATOS) == "a"

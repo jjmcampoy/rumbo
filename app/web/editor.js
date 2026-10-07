@@ -36,8 +36,16 @@
   };
   E.vista = new URLSearchParams(location.search).get("vista") || recuerda.lee("patrimonio.editor") || "productos";
 
+  // Cartera anclada a esta pestana (?cartera=<id>): se lee una sola vez al cargar y
+  // se anade a las llamadas a la API. Sin el parametro no se envia nada y todo
+  // funciona igual que siempre.
+  const pinCartera = new URLSearchParams(location.search).get("cartera") || "";
+  const conPin = url => pinCartera
+    ? url + (url.indexOf("?") < 0 ? "?" : "&") + "cartera=" + encodeURIComponent(pinCartera)
+    : url;
+
   async function api(metodo, url, cuerpo) {
-    const r = await fetch(url, {
+    const r = await fetch(conPin(url), {
       method: metodo, headers: { "Content-Type": "application/json", "X-Rumbo": "1" },
       body: cuerpo ? JSON.stringify(cuerpo) : undefined,
     });
@@ -664,7 +672,7 @@
     b.disabled = true;
     b.textContent = "Revisando y buscando precios…";
     try {
-      const r = await fetch("api/importar/previsualizar", { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
+      const r = await fetch(conPin("api/importar/previsualizar"), { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) throw new Error((j.errores || ["Algo ha fallado al leerlo."]).join("\n"));
       IMP.informe = j.informe;
@@ -1017,7 +1025,7 @@
     if (E.modo === "propio" && !confirm("Esto sustituye tu cartera actual por la de la copia. Tu cartera actual se guarda antes en «Copias automáticas». ¿Seguir?")) return;
     const fd = new FormData();
     fd.append("archivo", inp.files[0]);
-    const r = await fetch("api/copia/subir", { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
+    const r = await fetch(conPin("api/copia/subir"), { method: "POST", headers: { "X-Rumbo": "1" }, body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) { fallo.textContent = (j.errores || ["No he podido leer la copia."]).join("\n"); fallo.hidden = false; return; }
     recuerda.guarda("patrimonio.tab", "datos");
@@ -1081,7 +1089,7 @@
     carteraDuplicar: soloPropio(duplicarCartera),
     carteraBorrar: soloPropio(borrarCartera),
     carteraRecalcular() { CAR.resumen = null; pinta(); },
-    exportarWeb() { location.href = "api/exportar-web?ocultar=" + ($("#webOcultar").checked ? "1" : "0"); },
+    exportarWeb() { location.href = conPin("api/exportar-web?ocultar=" + ($("#webOcultar").checked ? "1" : "0")); },
     verPanelDatos() { recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); },
     async imCopiar() {
       const txt = IMP.prompt || (await api("GET", "api/prompt")).texto;
