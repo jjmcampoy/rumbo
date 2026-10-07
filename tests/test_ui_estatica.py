@@ -13,7 +13,7 @@ def test_marcado_ui():
     for aguja in ("api/carteras", "carteras/extraer", "activar", "__nueva__"):
         assert aguja in editor, aguja
     # la llamada real: una sola cuerda o un comentario no pueden satisfacerla
-    assert 'api("GET", "api/carteras/resumen")' in editor
+    assert 'api("GET", "api/carteras/resumen?series=1")' in editor
 
 
 def test_estatico_no_muestra_selector():
@@ -21,3 +21,10 @@ def test_estatico_no_muestra_selector():
     html = open(os.path.join(WEB, "index.html"), encoding="utf-8").read()
     sel = next(l for l in html.splitlines() if 'id="selCartera"' in l)
     assert "hidden" in sel, sel
+
+
+def test_contenedor_grafico_comparar():
+    # el grafico de la evolucion conjunta (T-50) necesita .envGraf: el tooltip
+    # (.gtt) va en position:absolute y solo se ancla con .envGraf{position:relative}
+    editor = open(os.path.join(WEB, "editor.js"), encoding="utf-8").read()
+    assert 'id="grafComparar" class="envGraf"' in editor

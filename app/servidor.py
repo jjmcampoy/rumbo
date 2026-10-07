@@ -382,6 +382,7 @@ def api_carteras_resumen():
     activa = carteras.activa(DATOS)
     lineas = []
     flujos_total, suma_valores, suma_p, suma_a, suma_pl, fecha_max = [], 0.0, 0.0, 0.0, 0.0, None
+    series_cartera, fechas_union = {}, set()   # para el grafico con series=1
     for c in carteras.lista(DATOS):
         cid = c.get("id")
         if not carteras.id_valido(cid) or not carteras.existe(DATOS, cid):
@@ -407,6 +408,11 @@ def api_carteras_resumen():
                            "No he podido leer o calcular esta cartera."})
             continue
         t = calc.get("total") or {}
+        serie_c = (calc.get("comparacion") or {}).get("tuya")
+        eje_c = calc.get("fechas") or []
+        if serie_c and len(serie_c) == len(eje_c):
+            series_cartera[cid] = list(zip(eje_c, serie_c))
+            fechas_union.update(eje_c)
         suma_p += float(t.get("patrimonio") or 0)
         suma_a += float(t.get("aportado") or 0)
         suma_pl += float(t.get("plusvalia") or 0)
@@ -428,7 +434,27 @@ def api_carteras_resumen():
         "rentabilidad": round(suma_pl / suma_a, 4) if suma_a else None,
         "tir": _tir_conjunto(flujos_total, fecha_max, suma_valores),
     }
-    return jsonify(ok=True, carteras=lineas, total=total)
+    body = dict(ok=True, carteras=lineas, total=total)
+    if request.args.get("series") == "1" and series_cartera:
+        # ?series=1: una linea por cartera (rellenada hacia delante) y un total
+        # conjunto, sobre un eje comun de fechas limitado a unos 10 anos.
+        fechas = sorted(fechas_union)[-3650:]
+        por, valores = {}, {}
+        for cid, pares in series_cartera.items():
+            # Relleno hacia delante: el primer valor conocido se sigue
+            # mostrando hasta que aparece el siguiente; None antes de empezar.
+            mapa, prev, serie = dict(pares), None, []
+            for f in fechas:
+                v = mapa.get(f)
+                if v is not None:
+                    prev = v
+                serie.append(prev)
+            por[cid] = serie
+            valores[cid] = serie
+        body["series"] = {"fechas": fechas, "porCartera": por,
+                          "total": [round(sum(vs for vs in vals if vs is not None), 2)
+                                   for vals in zip(*valores.values())]}
+    return jsonify(body)
 
 
 @app.post("/api/carteras")

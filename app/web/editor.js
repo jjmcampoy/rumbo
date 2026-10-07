@@ -181,7 +181,7 @@
     $("#edCuerpo").innerHTML = ({ productos: vistaProductos, movimientos: vistaMovimientos, saldos: vistaSaldos,
       importar: vistaImportar, copias: vistaCopias, carteras: vistaCarteras }[E.vista] || vistaProductos)();
     if (E.vista === "importar" || E.vista === "copias") conectaImportar();
-    if (E.vista === "carteras") conectaCarteras();
+    if (E.vista === "carteras") { conectaCarteras(); pintaComparacionEv(); }
     const filtro = $("#edFiltro");
     if (filtro) filtro.onchange = e => { E.filtro = e.target.value; pinta(); };
     pintaSelector();
@@ -822,7 +822,7 @@
   const RES = {
     j: null,
     async cargar() {
-      try { RES.j = await api("GET", "api/carteras/resumen"); }
+      try { RES.j = await api("GET", "api/carteras/resumen?series=1"); }
       catch (e) { RES.j = { ok: false, error: e.message }; }
       pinta();
     },
@@ -918,11 +918,38 @@
         <tfoot><tr><td style="text-align:left"><b>TOTAL</b></td>
           <td><b>${eur(t.patrimonio)}</b></td><td><b>${eur(t.aportado)}</b></td><td><b>${eur(t.plusvalia)}</b></td>
           <td><b>${pct(t.rentabilidad)}</b></td><td><b>${pct(t.tir)}</b></td><td></td><td></td></tr></tfoot></table></div>`;
+      // Evolución conjunta: una linea por cartera y el total, sobre un eje comun.
+      if ((j.series && (j.series.fechas || []).length > 1)) {
+        cuerpo += `<div style="margin-top:16px"><div id="grafComparar" class="envGraf"></div>
+          <div id="grafCompararLey" class="leyComp"></div></div>`;
+      }
     }
     return `<section class="tarjeta"><header><h2>Comparar</h2>
       <span class="subt">¿Qué cartera ha hecho más dinero?</span>
       <span class="sp"></span><button class="btn" data-acc="recalcularComparar">Recalcular</button></header>
     ${cuerpo}</section>`;
+  }
+
+  /* La linea de cada cartera y el total conjunto a lo largo del tiempo. */
+  function pintaComparacionEv() {
+    const cont = $("#grafComparar");
+    if (!cont || cont.dataset.hecho) return;
+    const j = RES.j;
+    if (!j || !j.ok || !j.series || !(j.series.fechas || []).length) return;
+    const s = j.series, nombres = {};
+    (j.carteras || []).forEach(c => { nombres[c.id] = c.nombre; });
+    const colores = ["--s1", "--s2", "--s3", "--s4"];
+    const series = Object.keys(s.porCartera).map((cid, i) => ({
+      nombre: nombres[cid] || cid, valores: s.porCartera[cid],
+      color: G.css(colores[i % colores.length]),
+    }));
+    series.push({ nombre: "TOTAL", valores: s.total, color: G.css("--tinta"), destacado: true });
+    G.multiLinea(cont, { fechas: s.fechas, alto: 320, series,
+      formatoY: v => G.fmtEurCorto(v), formatoValor: v => G.fmtEur(v, 0), desdeCero: true });
+    const ley = $("#grafCompararLey");
+    if (ley) ley.innerHTML = series.map(x =>
+      `<span class="leyItem"><i style="background:${x.color}"></i>${esc(x.nombre)}</span>`).join("");
+    cont.dataset.hecho = "1";
   }
 
   async function activarCartera(id) {
