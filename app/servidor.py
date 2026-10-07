@@ -364,6 +364,73 @@ def api_carteras():
     return jsonify(ok=True, activa=activa, carteras=cat)
 
 
+def _tir_conjunto(flujos, fecha_max, suma_valores):
+    """TIR de todas las carteras a la vez: la suma de los flujos de cada una
+    más su valor final en la fecha más reciente. None si no se puede."""
+    if not flujos or not fecha_max:
+        return None
+    try:
+        dflujos = [(dt.date.fromisoformat(f), v) for f, v in flujos if v]
+        return motor.r4(motor.xirr(dflujos + [(dt.date.fromisoformat(fecha_max), suma_valores)]))
+    except Exception:
+        return None
+
+
+@app.get("/api/carteras/resumen")
+def api_carteras_resumen():
+    """Cifras de cada cartera (de su cálculo guardado) y un total conjunto."""
+    activa = carteras.activa(DATOS)
+    lineas = []
+    flujos_total, suma_valores, suma_p, suma_a, suma_pl, fecha_max = [], 0.0, 0.0, 0.0, 0.0, None
+    for c in carteras.lista(DATOS):
+        cid = c.get("id")
+        if not carteras.id_valido(cid) or not carteras.existe(DATOS, cid):
+            continue
+        calc = lee_json(ruta_calculado(cid))
+        if not calc:
+            # Sin cálculo guardado: se hace aquí (bajo cerrojo y nunca descarga).
+            try:
+                with cerrojo:
+                    calc = motor.construir(lee_json(carteras.ruta(DATOS, cid), {}), DATOS,
+                                           descargar=False, historico=ruta_historico(cid))
+                if calc is not None:
+                    calc["modo"] = modo()
+                    escribe_json(ruta_calculado(cid), calc)
+            except Exception:
+                calc = None
+        if not calc:
+            # Una cartera rota no tumba el resumen: se muestra con error.
+            lineas.append({"id": cid, "nombre": c.get("nombre"), "activa": False,
+                           "patrimonio": None, "aportado": None, "plusvalia": None,
+                           "rentabilidad": None, "tir": None, "fechaExtracto": None,
+                           "generado": None, "nProductos": 0, "error":
+                           "No he podido leer o calcular esta cartera."})
+            continue
+        t = calc.get("total") or {}
+        suma_p += float(t.get("patrimonio") or 0)
+        suma_a += float(t.get("aportado") or 0)
+        suma_pl += float(t.get("plusvalia") or 0)
+        fecha_max = max(fecha_max or "", calc.get("fechaExtracto") or "") or None
+        for p in (calc.get("productos") or []):
+            if p.get("flujos"):
+                flujos_total.extend(p["flujos"])       # [[fecha, importe], ...]
+                suma_valores += float(p.get("valor") or 0.0)
+        lineas.append({"id": cid, "nombre": c.get("nombre"), "activa": cid == activa,
+                       "patrimonio": t.get("patrimonio"), "aportado": t.get("aportado"),
+                       "plusvalia": t.get("plusvalia"), "rentabilidad": t.get("rentabilidad"),
+                       "tir": t.get("tir"), "fechaExtracto": calc.get("fechaExtracto"),
+                       "generado": calc.get("generado"),
+                       "nProductos": len(calc.get("productos") or [])})
+    total = {
+        "patrimonio": round(suma_p, 2),
+        "aportado": round(suma_a, 2),
+        "plusvalia": round(suma_pl, 2),
+        "rentabilidad": round(suma_pl / suma_a, 4) if suma_a else None,
+        "tir": _tir_conjunto(flujos_total, fecha_max, suma_valores),
+    }
+    return jsonify(ok=True, carteras=lineas, total=total)
+
+
 @app.post("/api/carteras")
 def api_carteras_crear():
     """Crea una cartera. No la activa (la UI lo pide explícitamente), salvo en
