@@ -94,3 +94,14 @@ def test_guarda_valoracion_sustituye_mismo_producto_y_fecha():
     almacen.guarda_valoracion(cfg, {"producto": pid, "fecha": "2024-01-02", "valor": 1200})
     assert len(cfg["valoraciones"]) == 1
     assert cfg["valoraciones"][0]["valor"] == 1200
+
+
+def test_guarda_producto_guarda_grupo_truncado_y_lo_borra_si_esta_vacio():
+    cfg, pid = _con_producto(dict(PRODUCTO, grupo="Familia"))
+    assert cfg["productos"][0]["grupo"] == "Familia"
+    # 40 caracteres como máximo.
+    almacen.guarda_producto(cfg, dict(PRODUCTO, id=pid, grupo="g" * 50))
+    assert cfg["productos"][0]["grupo"] == "g" * 40
+    # vacío lo borra, no lo convierte en cadena vacía.
+    almacen.guarda_producto(cfg, dict(PRODUCTO, id=pid, grupo="  "))
+    assert "grupo" not in cfg["productos"][0]

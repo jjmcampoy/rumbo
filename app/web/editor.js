@@ -189,6 +189,11 @@
     if (E.vista === "carteras") { conectaCarteras(); pintaComparacionEv(); }
     const filtro = $("#edFiltro");
     if (filtro) filtro.onchange = e => { E.filtro = e.target.value; pinta(); };
+    const filtroGrupo = $("#edFiltroGrupo");
+    if (filtroGrupo) {
+      filtroGrupo.value = E.filtroGrupo || "";
+      filtroGrupo.onchange = e => { E.filtroGrupo = e.target.value; pinta(); };
+    }
     pintaSelector();
   }
 
@@ -230,23 +235,29 @@
     return c && c.nav ? `${num(c.nav)} € <small>${fecha(c.navFecha)}</small>` : '<small>tras guardar</small>';
   }
   function vistaProductos() {
-    const filas = E.cfg.productos.map(p => {
+    const grupos = [...new Set(E.cfg.productos.map(p => p.grupo).filter(Boolean))].sort();
+    const filas = (E.filtroGrupo
+      ? E.cfg.productos.filter(p => p.grupo === E.filtroGrupo)
+      : E.cfg.productos).map(p => {
       const n = soloSaldo(p) || manual(p)
         ? E.cfg.valoraciones.filter(v => v.producto === p.id).length + " valores"
         : E.cfg.movimientos.filter(m => m.producto === p.id).length + " movs.";
       return `<tr><td><i class="pt" style="background:var(--s${p.slot || 1})"></i>${esc(nombre(p))}
           ${p.identificador ? `<small class="idp">${esc(p.identificador)}</small>` : ""}</td>
+        <td>${esc(p.grupo || "")}</td>
         <td>${esc(E.tipos[p.tipo] || p.tipo)}</td><td>${precioDe(p)}</td>
         <td>${esc(E.fuentes[p.fuente] || "")}${p.codigo ? ` <small>${esc(p.codigo)}</small>` : ""}</td>
         <td>${n}</td>
         <td class="acc"><button data-acc="editarProducto" data-id="${esc(p.id)}">Editar</button>
           <button data-acc="borrarProducto" data-id="${esc(p.id)}">Borrar</button></td></tr>`;
     }).join("");
+    const filtroGrupo = grupos.length ? `<select id="edFiltroGrupo" aria-label="Filtrar por grupo">
+        <option value="">Todos los grupos</option>${grupos.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join("")}</select>` : "";
     return `<section class="tarjeta"><header><h2>Productos</h2>
         <span class="subt">Todo lo que tienes: fondos, acciones, cripto, cuentas, planes, inmuebles…</span>
         <span class="sp"></span>${E.cfg.productos.length > 1 ? '<button class="btn" data-acc="repartirColores" title="Da a cada producto un color distinto">Repartir colores</button>' : ""}
-        <button class="btn prim" data-acc="nuevoProducto">+ Añadir producto</button></header>
-      ${filas ? `<div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Tipo</th><th>Último precio</th>
+        ${filtroGrupo}<button class="btn prim" data-acc="nuevoProducto">+ Añadir producto</button></header>
+      ${filas ? `<div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Grupo</th><th>Tipo</th><th>Último precio</th>
         <th>Fuente del precio</th><th>Datos</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
         : '<p class="subt">Todavía no has añadido ningún producto.</p>'}</section>`;
   }
@@ -288,6 +299,7 @@
       <div class="rejilla">
         ${campo("Nombre", '<input name="nombre" required>', "", "ancho")}
         ${campo("Nombre corto", '<input name="corto" maxlength="24">', "para los gráficos")}
+        ${campo("Grupo", '<input name="grupo" maxlength="40">', "opcional, para comparar")}
         ${campo("Tipo", `<select name="tipo">${opciones(E.tipos, p.tipo)}</select>`)}
         ${campo("ISIN o ticker", '<input name="identificador">', "opcional")}
         ${campo("Banco o bróker", '<input name="entidad">', "opcional")}

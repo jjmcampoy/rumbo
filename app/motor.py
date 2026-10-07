@@ -909,6 +909,29 @@ def construir(cfg, carpeta, descargar=True, historico=None):
                  "color": PALETA.get(slot[k], PALETA[8])}
                 for k, v in sorted(acc.items(), key=lambda x: -x[1])]
 
+    # comparacion de grupos dentro de la misma cartera (etiqueta libre, sin movimientos propios)
+    por_grupo = {}
+    for p in productos:
+        pg = p.get("grupo")
+        if not pg:
+            continue
+        g = por_grupo.setdefault(pg, {"nombre": pg, "valor": 0.0, "aportado": 0.0, "flujos": []})
+        g["valor"] += p["valor"]
+        if p["aportado"]:
+            g["aportado"] += p["aportado"]
+        g["flujos"].extend((d(f), v) for f, v in p["flujos"])
+    por_grupo_lista = []
+    for k, g in por_grupo.items():
+        val = round(g["valor"], 2)
+        ap = round(g["aportado"], 2) or None
+        flujos = g["flujos"]
+        por_grupo_lista.append({
+            "nombre": k, "valor": val, "aportado": ap,
+            "plusvalia": round(val - ap, 2) if ap else None,
+            "rentabilidad": r4((val - ap) / ap) if ap else None,
+            "tir": r4(xirr(flujos + [(fecha_extracto, val)])) if flujos else None})
+    por_grupo_lista.sort(key=lambda g: -g["valor"])
+
     # aportaciones mensuales
     meses = sorted({a["fecha"][:7] for p in productos for a in p["aportaciones"]
                     if a.get("importe")})
@@ -1265,6 +1288,7 @@ def construir(cfg, carpeta, descargar=True, historico=None):
             "porClase": agrupar("clase"),
             "porEntidad": agrupar("entidad"),
             "porTipo": agrupar("tipo"),
+            "porGrupo": por_grupo_lista,
             "hitos": hitos,
             "racha": racha,
             "ritmoMensual": ritmo,

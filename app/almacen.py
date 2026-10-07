@@ -192,14 +192,16 @@ def texto(v, maximo=200):
 
 # ---------------------------------------------------------------- productos
 
-CAMPOS_TEXTO = ("nombre", "corto", "identificador", "codigo", "entidad", "clase", "gestora",
+CAMPOS_TEXTO = ("nombre", "corto", "grupo", "identificador", "codigo", "entidad", "clase", "gestora",
                 "tipoDetalle", "respaldo", "respaldoMoneda", "vivo", "papel")
+
+LONGITUD_CUPOS = {"grupo": 40}   # extensión de los textos más breves
 
 
 def guarda_producto(cfg, datos):
     """Crea o actualiza un producto. Devuelve (producto, cambió_la_fuente)."""
     errores = []
-    nuevo = {k: texto(datos.get(k), 400 if k == "papel" else 200) for k in CAMPOS_TEXTO}
+    nuevo = {k: texto(datos.get(k), 400 if k == "papel" else LONGITUD_CUPOS.get(k, 200)) for k in CAMPOS_TEXTO}
     if not nuevo["nombre"]:
         errores.append("Ponle un nombre al producto.")
     tipo = datos.get("tipo")

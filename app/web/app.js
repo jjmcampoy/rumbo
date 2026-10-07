@@ -64,6 +64,37 @@
     ocultos: new Set(),
   };
 
+  /* ---------------------------------------------- comparacion de grupos */
+  // Agrupa productos dentro de una misma cartera por la etiqueta «grupo». Cada grupo
+  // reutiliza los flujos de sus productos para sacar la TIR; no lleva movimientos propios.
+  function pintaGrupos() {
+    let cont = $("#seccionGrupos");
+    if (!cont) {
+      const ancla = $("#grafAnual");
+      if (!ancla) return;
+      cont = document.createElement("div");
+      ancla.closest(".tarjeta").insertAdjacentElement("afterend", cont);
+    }
+    const grupos = (D.total || {}).porGrupo || [];
+    if (!grupos.length) { cont.innerHTML = ""; return; }
+    cont.innerHTML = `<section class="tarjeta" id="seccionGrupos">
+      <header><h2>Comparar grupos</h2><span class="subt">Valor, aportado y TIR de cada grupo en la misma cartera</span></header>
+      <div class="tablaEnv"><table class="dt" id="tablaGrupos">
+        <thead><tr><th>Grupo</th><th>Valor</th><th>Aportado</th><th>Plusvalía</th>
+          <th>Rentabilidad</th><th>TIR</th></tr></thead>
+        <tbody>${grupos.map(g => `<tr>
+          <td>${esc(g.nombre)}</td>
+          <td>${G.fmtEur(g.valor)}</td>
+          <td>${g.aportado == null ? '<span class="subt">—</span>' : G.fmtEur(g.aportado)}</td>
+          <td>${g.plusvalia == null ? '<span class="subt">—</span>'
+            : `<span class="${g.plusvalia >= 0 ? "pos" : "neg"}">${G.fmtEurSigno(g.plusvalia)}</span>`}</td>
+          <td>${g.rentabilidad == null ? '<span class="subt">—</span>'
+            : `<span class="${g.rentabilidad >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(g.rentabilidad, 1)}</span>`}</td>
+          <td>${g.tir == null ? '<span class="subt">—</span>'
+            : `<span class="${g.tir >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(g.tir, 1)}</span>`}</td>
+        </tr>`).join("")}</tbody></table></div></section>`;
+  }
+
   /* ---------------------------------------------- ¿y si lo hubieras metido en un indexado? */
   function pintaComparacion() {
     const C = D.comparacion, sec = $("#seccionComparar");
@@ -627,7 +658,8 @@
     ], estado.vista, id => { estado.vista = id; pintaPatrimonio(); });
     pintaSegm($("#segDist"), [
       { id: "clase", et: "Activo" }, { id: "producto", et: "Producto" },
-      { id: "entidad", et: "Entidad" }, { id: "tipo", et: "Tipo" }
+      { id: "entidad", et: "Entidad" }, { id: "tipo", et: "Tipo" },
+      { id: "grupo", et: "Grupo" }
     ], estado.dist, id => { estado.dist = id; pintaDistribucion(); });
     pintaSegm($("#segTabla"), [{ id: "todos", et: "Todos" }].concat(
       D.productos.filter(p => (p.aportaciones || []).some(a => a.importe))
@@ -965,6 +997,7 @@
     }
 
     pintaComparacion();
+    pintaGrupos();
 
     const comp = D.comparador || [];
     const detalles = $("#compDetalles");
