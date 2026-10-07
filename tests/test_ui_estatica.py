@@ -34,6 +34,17 @@ def test_selector_oculto_en_el_html():
     assert '<select id="selCartera" class="selCartera" hidden' in html
 
 
+def test_contenedor_del_grafico_comparar_ancla_el_tooltip():
+    # `.gtt` (el tooltip de los gráficos) es position:absolute, así que lo ancla el
+    # contenedor con `.envGraf{position:relative}`. Si el contenedor lleva cualquier
+    # otra clase, el tooltip se escapa y se pinta arriba de la página (visto en el
+    # manual de T-50). Todo contenedor de gráfico debe usar «envGraf».
+    assert 'id="grafComparar" class="envGraf"' in _lee("editor.js")
+    html = _lee("index.html")
+    assert ".envGraf{position:relative" in html
+    assert ".gtt{" in html and "position:absolute" in html
+
+
 def test_estatico_no_muestra_selector():
     # La exportación quita la pestaña de datos y el editor; el selector debe seguir oculto.
     datos = {"modo": "propio", "avisos": [], "vivo": None, "total": {}, "fechaExtracto": "2024-01-01"}

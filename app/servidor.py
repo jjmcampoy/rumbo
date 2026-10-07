@@ -359,6 +359,7 @@ def api_carteras_resumen():
     if modo() == "demo":
         return jsonify(ok=False, errores=[AVISO_DEMO]), 403
     filas, flujos, fechas = [], [], []
+    ejes = {}  # cid -> (fechas, valores) de las carteras que se calcularon
     for c in carteras.lista(DATOS):
         cid = c["id"]
         fila = {"id": cid, "nombre": c["nombre"], "activa": cid == _cid()}
@@ -404,6 +405,9 @@ def api_carteras_resumen():
                 fechas.append(dt.date.fromisoformat(str(calc["fechaExtracto"])))
             except ValueError:
                 pass
+        # Serie de valores de la cartera (comparacion.tuya) sobre su eje de fechas.
+        ejes[cid] = (list(calc.get("fechas") or []),
+                     list((calc.get("comparacion") or {}).get("tuya") or []))
         filas.append(fila)
     total = {"patrimonio": 0.0, "aportado": 0.0, "plusvalia": 0.0,
              "rentabilidad": None, "tir": None}
@@ -417,7 +421,34 @@ def api_carteras_resumen():
         total["rentabilidad"] = round(total["plusvalia"] / total["aportado"], 4)
     if flujos and fechas:
         total["tir"] = motor.xirr(flujos + [(max(fechas), total["patrimonio"])])
-    return jsonify(carteras=filas, total=total)
+    resp = {"carteras": filas, "total": total}
+    if request.args.get("series"):
+        # Eje común: unión ordenada de las fechas de cada cartera, acotado a
+        # ~10 años para que la respuesta no crezca sin límite.
+        union = sorted({f for fs, _ in ejes.values() for f in fs})
+        if union:
+            union = union[-3650:]
+        por_cartera, total_serie = {}, []
+        for cid, (fs, vs) in ejes.items():
+            pos = {f: i for i, f in enumerate(fs)}
+            serie = [None] * len(union)
+            for f, v in zip(fs, vs):
+                i = pos.get(f)
+                if i is not None and union and union[0] <= f <= union[-1]:
+                    serie[union.index(f)] = v
+            # Relleno hacia adelante: el último valor conocido se repite.
+            ultimo = None
+            for i, v in enumerate(serie):
+                if v is not None:
+                    ultimo = v
+                else:
+                    serie[i] = ultimo
+            por_cartera[cid] = serie
+        for i in range(len(union)):
+            vals = [s[i] for s in por_cartera.values() if s[i] is not None]
+            total_serie.append(round(sum(vals), 2) if vals else None)
+        resp["series"] = {"fechas": union, "porCartera": por_cartera, "total": total_serie}
+    return jsonify(resp)
 
 
 @app.post("/api/carteras")

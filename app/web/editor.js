@@ -203,6 +203,7 @@
     $("#edCuerpo").innerHTML = ({ productos: vistaProductos, movimientos: vistaMovimientos, saldos: vistaSaldos,
       importar: vistaImportar, carteras: vistaCarteras, copias: vistaCopias }[E.vista] || vistaProductos)();
     if (E.vista === "importar" || E.vista === "copias") conectaImportar();
+    if (E.vista === "carteras") pintaGraficoComparar(CAR.resumen);
     const filtro = $("#edFiltro");
     if (filtro) filtro.onchange = e => { E.filtro = e.target.value; pinta(); };
   }
@@ -780,9 +781,27 @@
       <td>${f.nProductos ?? "—"}</td>${acc}</tr>`;
   }
 
+  function pintaGraficoComparar(r) {
+    // Se llama una vez el HTML ya está en el DOM: el contenedor existe.
+    const cont = $("#grafComparar");
+    if (!cont || !r || !r.series) return;
+    const s = r.series;
+    const paleta = [G.css("--s1"), G.css("--s2"), G.css("--s3"), G.css("--s4"), G.css("--s5"), G.css("--s7"), G.css("--s6")];
+    const series = (r.carteras || []).map((f, i) => ({
+      nombre: f.nombre, valores: (s.porCartera || {})[f.id] || [],
+      color: paleta[i % paleta.length],
+    }));
+    series.push({ nombre: "TOTAL", valores: s.total || [], destacado: true, color: G.css("--tinta") });
+    G.multiLinea(cont, {
+      fechas: s.fechas, series, alto: 320,
+      formatoY: v => Math.round(v),
+      formatoValor: v => v.toFixed(1),
+    });
+  }
+
   function seccionComparar() {
     if (CAR.resumen === null) {
-      api("GET", "api/carteras/resumen").then(j => {
+      api("GET", "api/carteras/resumen?series=1").then(j => {
         CAR.resumen = j;
         if (E.vista === "carteras") pinta();
       }).catch(() => { CAR.resumen = { carteras: [], total: null, error: "No se ha podido calcular el resumen." };
@@ -803,13 +822,15 @@
       <td><b>${t.tir == null ? "—" : num(t.tir * 100, 2) + " %"}</b></td>
       <td><b>${(r.carteras || []).reduce((s, f) => s + (f.nProductos || 0), 0)}</b></td><td></td></tr>`;
     const aviso = r.error ? `<div class="av"><span>⚠</span><span>${esc(r.error)}</span></div>` : "";
+    const grafico = r.series ? `<div id="grafComparar" class="envGraf"></div>` : "";
     return `<section class="tarjeta"><header><h2>Comparar</h2>
         <span class="subt">¿Qué cartera ha ganado más? Cifras de cada cartera y el total conjunto.</span>
         <span class="sp"></span><button class="btn" data-acc="carteraRecalcular">Recalcular</button></header>
       ${aviso}
       <div class="tablaEnv"><table class="dt"><thead><tr><th style="text-align:left">Cartera</th>
         <th>Valor</th><th>Aportado</th><th>Plusvalía</th><th>Rentabilidad</th><th>TIR</th>
-        <th>Productos</th><th></th></tr></thead><tbody>${filas}${total}</tbody></table></div></section>`;
+        <th>Productos</th><th></th></tr></thead><tbody>${filas}${total}</tbody></table></div>
+      ${grafico}</section>`;
   }
 
   function vistaCarteras() {
