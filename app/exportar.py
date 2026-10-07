@@ -14,6 +14,8 @@ porcentajes), nunca tu patrimonio real.
 
 import base64
 import datetime as dt
+# Con alias: dentro de pagina() hay una variable local `html` con la página.
+import html as _html
 import json
 import os
 import random
@@ -114,7 +116,7 @@ def pagina(web, datos, ocultar=False, titulo="Mi patrimonio"):
     desc = "Panel de patrimonio neto e inversiones hecho con Rumbo." + (" Importes ocultos." if ocultar else "")
     cabeceras = ('<meta name="robots" content="noindex, nofollow">\n'
                  f'<link rel="icon" type="image/png" href="{icono}">\n'
-                 f'<meta property="og:title" content="{titulo} · Rumbo">\n'
+                 f'<meta property="og:title" content="{_html.escape(str(titulo), quote=True)} · Rumbo">\n'
                  f'<meta property="og:description" content="{desc}">\n'
                  f'<meta name="description" content="{desc}">\n'
                  f'<!-- Exportado el {dt.datetime.now():%d/%m/%Y %H:%M} -->')

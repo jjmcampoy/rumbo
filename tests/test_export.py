@@ -50,3 +50,15 @@ def test_pagina_sin_cargador_lanza_error(tmp_path):
     (web / "index.html").write_text("<html><body></body></html>", encoding="utf-8")
     with pytest.raises(RuntimeError):
         exportar.pagina(str(web), DATOS_MINIMOS)
+
+
+def test_el_nombre_de_la_cartera_no_inyecta_html():
+    """F-02: el titular es editable («Renombrar») y acaba en el `og:title` del
+    export, que es la página que el usuario publica. Debe ir escapado."""
+    malo = 'P"><script>alert(1)</script>'
+    html = exportar.pagina(WEB, DATOS_MINIMOS, titulo=malo)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    # Un nombre normal sigue saliendo tal cual.
+    normal = exportar.pagina(WEB, DATOS_MINIMOS, titulo="Mi patrimonio")
+    assert 'content="Mi patrimonio · Rumbo"' in normal
